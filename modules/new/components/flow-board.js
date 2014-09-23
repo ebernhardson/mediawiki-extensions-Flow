@@ -1638,9 +1638,8 @@
 						name: author
 					},
 					// text for flow-reply-topic-title-placeholder placeholder
-					content: {
-						content: replyToContent,
-						format: 'plaintext'
+					properties: {
+						'topic-of-post': replyToContent.substr( 0, 200 ).trim()
 					}
 				}
 			) ).children();
