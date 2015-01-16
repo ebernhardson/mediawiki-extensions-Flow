@@ -58,11 +58,6 @@ class Workflow {
 	protected $titleText;
 
 	/**
-	 * @var UserTuple
-	 */
-	protected $user;
-
-	/**
 	 * @var string
 	 */
 	protected $lastModified;
@@ -96,10 +91,6 @@ class Workflow {
 		$obj->pageId = $row['workflow_page_id'];
 		$obj->namespace = (int) $row['workflow_namespace'];
 		$obj->titleText = $row['workflow_title_text'];
-		$obj->user = UserTuple::newFromArray( $row, 'workflow_user_' );
-		if ( !$obj->user ) {
-			throw new DataModelException( 'Could not create UserTuple for workflow_user_' );
-		}
 		$obj->lastModified = $row['workflow_last_update_timestamp'];
 
 		return $obj;
@@ -117,9 +108,6 @@ class Workflow {
 			'workflow_page_id' => $obj->pageId,
 			'workflow_namespace' => $obj->namespace,
 			'workflow_title_text' => $obj->titleText,
-			'workflow_user_wiki' => $obj->user->wiki,
-			'workflow_user_id' => $obj->user->id,
-			'workflow_user_ip' => $obj->user->ip,
 			'workflow_lock_state' => 0, // unused
 			'workflow_last_update_timestamp' => $obj->lastModified,
 			// not used, but set it to empty string so it doesn't fail in strict mode
@@ -129,12 +117,11 @@ class Workflow {
 
 	/**
 	 * @param string $type
-	 * @param User $user
 	 * @param Title $title
 	 * @return Workflow
 	 * @throws DataModelException
 	 */
-	static public function create( $type, User $user, Title $title ) {
+	static public function create( $type, Title $title ) {
 		// temporary limitation until we implement something more concrete
 		if ( !in_array( $type, self::$allowedTypes ) ) {
 			throw new DataModelException( 'Invalid workflow type provided: ' . $type, 'process-data' );
@@ -153,8 +140,7 @@ class Workflow {
 		$obj->pageId = $title->getArticleID();
 		$obj->namespace = $title->getNamespace();
 		$obj->titleText = $title->getDBkey();
-		$obj->user = UserTuple::newFromUser( $user );
-		$obj->updateLastModified();
+		$obj->updateLastModified( $obj->id );
 
 		return $obj;
 	}
@@ -205,7 +191,8 @@ class Workflow {
 	 */
 	public static function getFromTitleCache( $wiki, $namespace, $titleText ) {
 		if ( $wiki !== wfWikiId() ) {
-			throw new CrossWikiException( 'Interwiki to ' . $wiki . ' not implemented ', 'default' );
+			$thisWiki = wfWikiId();
+			throw new CrossWikiException( "Interwiki to '$wiki' from '$thisWiki'  not implemented", 'default' );
 		}
 		if ( self::$titleCache === null ) {
 			self::$titleCache = new MapCacheLRU( 50 );
@@ -244,26 +231,6 @@ class Workflow {
 	public function isNew() { return (bool) $this->isNew; }
 
 	/**
-	 * @return UserTuple
-	 */
-	public function getUserTuple() { return $this->user; }
-
-	/**
-	 * @return integer
-	 */
-	public function getUserId() { return $this->user->id; }
-
-	/**
-	 * @return string|null
-	 */
-	public function getUserIp() { return $this->user->ip; }
-
-	/**
-	 * @return string
-	 */
-	public function getUserWiki() { return $this->user->wiki; }
-
-	/**
 	 * @return string
 	 */
 	public function getLastModified() { return $this->lastModified; }
@@ -273,8 +240,8 @@ class Workflow {
 	 */
 	public function getLastModifiedObj() { return new MWTimestamp( $this->lastModified ); }
 
-	public function updateLastModified() {
-		$this->lastModified = wfTimestampNow();
+	public function updateLastModified( UUID $latestRevisionId ) {
+		$this->lastModified = $latestRevisionId->getTimestamp();
 	}
 
 	/**

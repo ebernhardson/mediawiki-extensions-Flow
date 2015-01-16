@@ -2,6 +2,7 @@
 
 use Flow\Block\AbstractBlock;
 use Flow\Model\Anchor;
+use Flow\Model\UUID;
 
 abstract class ApiFlowBaseGet extends ApiFlowBase {
 	public function execute() {
@@ -26,7 +27,7 @@ abstract class ApiFlowBaseGet extends ApiFlowBase {
 					$blockParams = $passedParams[$block->getName()];
 				}
 
-				$output[$action]['result'][$block->getName()] = $block->renderAPI( $blockParams );
+				$output[$action]['result'][$block->getName()] = $block->renderApi( $blockParams );
 			}
 		}
 
@@ -37,7 +38,7 @@ abstract class ApiFlowBaseGet extends ApiFlowBase {
 		// If nothing could render, we'll consider that an error (at least some
 		// block should've been able to render a GET request)
 		if ( !$output[$action]['result'] ) {
-			$this->getResult()->dieUsage(
+			$this->dieUsage(
 				wfMessage( 'flow-error-no-render' )->parse(),
 				'no-render',
 				200,
@@ -54,6 +55,8 @@ abstract class ApiFlowBaseGet extends ApiFlowBase {
 				$value = $value->toArray();
 			} elseif ( $value instanceof Message ) {
 				$value = $value->text();
+			} elseif ( $value instanceof UUID ) {
+				$value = $value->getAlphadecimal();
 			}
 		} );
 

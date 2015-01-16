@@ -1,9 +1,7 @@
 When(/^I add (\d+) comments to the Topic$/) do |number|
   number.to_i.times do
-    on(FlowPage) do |page|
-      @saved_random=Random.new.rand.to_s
-      step 'I reply with comment "' + 'Selenium comment ' + @saved_random + '"'
-    end
+    @saved_random = Random.new.rand.to_s
+    step 'I reply with comment "' + 'Selenium comment ' + @saved_random + '"'
   end
 end
 
@@ -16,13 +14,16 @@ When(/^I click Permalink from the 3rd comment Post Actions menu$/) do
 end
 
 When(/^I click the Post Actions link on the 3rd comment on the topic$/) do
-  on(FlowPage).third_post_actions_link_element.when_present.click
+  on(FlowPage) do |page|
+    page.third_post_actions_link_element.when_present.focus
+    page.third_post_actions_link_element.click
+  end
 end
 
 When(/^I go to an old style permalink to my topic$/) do
   on(FlowPage) do |curPage|
-    workflowId = curPage.flow_first_topic_element.attribute( 'data-flow-id' )
-    visit(FlowOldPermalinkPage, :using_params => {:workflow_id => workflowId})
+    work_flow_id = curPage.flow_first_topic_element.attribute('data-flow-id')
+    visit(FlowOldPermalinkPage, using_params: { workflow_id: work_flow_id })
   end
 end
 

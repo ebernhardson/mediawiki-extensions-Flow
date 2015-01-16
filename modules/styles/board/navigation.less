@@ -6,13 +6,11 @@
 // Top board navigation bar
 .flow-board-navigation {
 	left: 0;
-	font-size: 1em;
 	position: static;
 	padding: 0;
 	white-space: nowrap;
 	min-width: 14em;
 	clear: both;
-	max-width: 915px;
 
 	a:link, a:visited {
 		padding: 0.2em 0.3em;
@@ -26,6 +24,7 @@
 	.flow-board-navigation-inner {
 		overflow: hidden;
 		border-bottom: 1px solid @colorGrayLight;
+		white-space: nowrap;
 	}
 
 	.flow-board-navigator-filter {
@@ -55,19 +54,75 @@
 		&.flow-board-navigator-first {
 			padding-left: 0;
 		}
-		&.flow-board-navigator-last {
-			position: absolute;
-			bottom: 0;
-			right: -2.5em;
-			width: 1.1em;
-			border-bottom: 1px solid @colorGrayLight;
+	}
+
+	// Added by JS when the window has been scrolled beyond the navigation, so it sticks to the viewport
+	&.flow-board-navigation-affixed {
+		position: fixed;
+		z-index: 2;
+		top: 0;
+		width: 100%;
+		background: @colorWhite;
+
+		.flow-board-toc-menu {
+			.flow-list {
+				// TODO: We can't use units like vh yet since IE 8 doesn't support them.
+				max-height: 85vh;
+			}
 		}
+
+		.flow-board-navigation-inner {
+			& > a {
+				display: none; // hide everything but the current topic title
+			}
+
+			& > a.flow-board-navigator-active {
+				// Clip the topic title
+				display: block;
+				overflow: hidden;
+				white-space: nowrap;
+				text-overflow: ellipsis;
+			}
+		}
+
 	}
 }
 
-// Filter menu below navigation bar
-.flow-board-filter-menu {
+// Filter & TOC menu below navigation bar
+.flow-board-header-menu {
 	position: relative;
+	float: right;
+
+	// Make TOC wide
+	.flow-board-toc-menu {
+		width: 100%;
+
+		.flow-list {
+			overflow-y: auto;
+			max-height: 18em;
+			max-height: 50vh;
+		}
+
+		a {
+			display: block;
+			overflow: hidden;
+			white-space: nowrap;
+			text-align: left;
+			text-overflow: ellipsis;
+			padding-left: 0;
+			padding-right: 0;
+
+			&.active {
+				font-weight: bold;
+			}
+		}
+
+		// This makes the list items align with the TOC bar text
+		.wikiglyph {
+			visibility: hidden;
+			font-weight: bold;
+		}
+	}
 }
 
 // MEDIA QUERIES
@@ -77,6 +132,5 @@
 		font-size: 1.15em;
 		position: relative;
 		padding-top: .5em;
-		padding-right: 200px;
 	}
 }

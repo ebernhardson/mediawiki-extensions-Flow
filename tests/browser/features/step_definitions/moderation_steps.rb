@@ -27,11 +27,11 @@ When(/^I give reason for suppression as being "(.*?)"$/) do |suppress_reason|
 end
 
 When(/^I see a dialog box$/) do
-  on(FlowPage).dialog_element.when_present.should be_visible
+  on(FlowPage).dialog_element.when_present
 end
 
 Then(/^I confirm$/) do
-  on(FlowPage).confirm(true){}
+  on(FlowPage).confirm(true) {}
 end
 
 Then(/^I do not see the dialog box$/) do
@@ -39,9 +39,9 @@ Then(/^I do not see the dialog box$/) do
 end
 
 Then(/^the top post should be marked as deleted$/) do
-  expect(on(FlowPage).flow_first_topic_moderation_msg_element.when_present.text).to match("This topic was locked by Selenium user")
+  expect(on(FlowPage).flow_first_topic_moderation_msg_element.when_present.text).to match("This topic has been deleted")
 end
 
 Then(/^the top post should be marked as suppressed$/) do
-  expect(on(FlowPage).flow_first_topic_moderation_msg_element.when_present.text).to match("This topic was locked by Selenium user")
+  expect(on(FlowPage).flow_first_topic_moderation_msg_element.when_present.text).to match("This topic has been suppressed")
 end

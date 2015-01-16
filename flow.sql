@@ -9,10 +9,6 @@ CREATE TABLE /*_*/flow_workflow (
 	workflow_title_text varchar(255) binary not null,
     workflow_name varchar(255) binary not null,
 	workflow_last_update_timestamp binary(14) not null,
-	-- TODO: check what the new global user ids need for storage
-	workflow_user_id bigint unsigned not null,
-	workflow_user_ip varbinary(39) default null,
-	workflow_user_wiki varchar(32) binary not null,
 	-- TODO: is this usefull as a bitfield?  may be premature optimization, a string
 	-- or list of strings may be simpler and use only a little more space.
 	workflow_lock_state int unsigned not null,
@@ -111,6 +107,9 @@ CREATE TABLE /*_*/flow_revision (
 	rev_edit_user_id bigint unsigned,
 	rev_edit_user_ip varbinary(39) default null,
 	rev_edit_user_wiki varchar(32) binary default null,
+
+	rev_content_length int not null default 0,
+	rev_previous_content_length int not null default 0,
 
 	PRIMARY KEY (rev_id)
 ) /*$wgDBTableOptions*/;

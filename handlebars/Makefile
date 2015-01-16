@@ -12,7 +12,9 @@ POST_SUBTEMPLATES=flow_post.handlebars \
 		flow_post_author.handlebars \
 		flow_post_meta_actions.handlebars \
 		flow_post_replies.handlebars \
-		flow_reply_form.handlebars
+		flow_reply_form.handlebars \
+		flow_moderation_actions_list.handlebars \
+		flow_post_moderation_state.handlebars
 
 TOPIC_SUBTEMPLATES=flow_topic.handlebars \
 		flow_topic_titlebar.handlebars \
@@ -25,13 +27,15 @@ TOPIC_SUBTEMPLATES=flow_topic.handlebars \
 		flow_topiclist_loop.handlebars \
 		flow_load_more.handlebars \
 		flow_errors.handlebars \
-		flow_form_buttons.handlebars
+		flow_form_buttons.handlebars \
+		flow_moderation_actions_list.handlebars \
+		flow_post_moderation_state.handlebars
 
-all: compiled/flow_block_header.handlebars.php \
+all: compiled/flow_block_loop.handlebars.php \
+		compiled/flow_block_header.handlebars.php \
 		compiled/flow_block_header_edit.handlebars.php \
 		compiled/flow_block_header_single_view.handlebars.php \
 		compiled/flow_block_header_diff_view.handlebars.php \
-		compiled/flow_board_collapsers_subcomponent.handlebars.php \
 		compiled/flow_block_topiclist.handlebars.php \
 		compiled/flow_block_topiclist_newtopic.handlebars.php \
 		compiled/flow_block_topic.handlebars.php \
@@ -47,11 +51,14 @@ all: compiled/flow_block_header.handlebars.php \
 		compiled/flow_block_topicsummary_edit.handlebars.php \
 		compiled/flow_block_topicsummary_single_view.handlebars.php \
 		compiled/flow_block_topicsummary_diff_view.handlebars.php \
-		compiled/flow_component.handlebars.php \
 		compiled/flow_form_buttons.handlebars.php \
 		compiled/flow_post.handlebars.php \
 		compiled/flow_tooltip.handlebars.php \
 		compiled/timestamp.handlebars.php
+
+compiled/flow_block_loop.handlebars.php: \
+		flow_block_loop.handlebars
+	$(COMPILE) flow_block_loop
 
 compiled/flow_block_header.handlebars.php: \
 		flow_block_header.handlebars \
@@ -90,10 +97,6 @@ compiled/flow_block_topicsummary_single_view.handlebars.php: \
 compiled/flow_block_topicsummary_diff_view.handlebars.php: \
 		flow_block_topicsummary_diff_view.handlebars
 	$(COMPILE) flow_block_topicsummary_diff_view
-
-compiled/flow_board_collapsers_subcomponent.handlebars.php: \
-		flow_board_collapsers_subcomponent.handlebars
-	$(COMPILE) flow_board_collapsers_subcomponent
 
 compiled/flow_block_topiclist.handlebars.php: \
 		flow_block_topiclist.handlebars \
@@ -164,11 +167,6 @@ compiled/flow_block_topic_moderate_topic.handlebars.php: \
 compiled/flow_block_board-history.handlebars.php: \
 		flow_block_board-history.handlebars
 	$(COMPILE) flow_block_board-history
-
-compiled/flow_component.handlebars.php: \
-		flow_component.handlebars \
-		flow_block_loop.handlebars
-	$(COMPILE) flow_component
 
 compiled/flow_form_buttons.handlebars.php: \
 		flow_form_buttons.handlebars

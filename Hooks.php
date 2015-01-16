@@ -90,6 +90,11 @@ class FlowHooks {
 		if ( $wgFlowAbuseFilterGroup ) {
 			self::getAbuseFilter();
 		}
+
+		// development dependencies to simplify testing
+		if ( defined( 'MW_PHPUNIT_TEST' ) && file_exists( __DIR__ . '/vendor/autoload.php' ) ) {
+			require_once __DIR__ . '/vendor/autoload.php';
+		}
 	}
 
 	/**
@@ -119,6 +124,7 @@ class FlowHooks {
 			// sqlite ignores field types, this just substr's uuid's to 88 bits
 			$updater->modifyExtensionField( 'flow_workflow', 'workflow_id', "$dir/db_patches/patch-88bit_uuids.sqlite.sql" );
 			$updater->addExtensionField( 'flow_workflow', 'workflow_type', "$dir/db_patches/patch-add_workflow_type.sqlite" );
+			$updater->modifyExtensionField( 'flow_workflow', 'workflow_user_id', "$dir/db_patches/patch-default_null_workflow_user.sqlite.sql" );
 		} else {
 			// sqlite doesn't support alter table change, it also considers all types the same so
 			// this patch doesn't matter to it.
@@ -130,6 +136,7 @@ class FlowHooks {
 			// convert 128 bit uuid's into 88bit
 			$updater->modifyExtensionField( 'flow_workflow', 'workflow_id', "$dir/db_patches/patch-88bit_uuids.sql" );
 			$updater->addExtensionField( 'flow_workflow', 'workflow_type', "$dir/db_patches/patch-add_workflow_type.sql" );
+			$updater->modifyExtensionField( 'flow_workflow', 'workflow_user_id', "$dir/db_patches/patch-default_null_workflow_user.sql" );
 		}
 
 		$updater->addExtensionIndex( 'flow_workflow', 'flow_workflow_lookup', "$dir/db_patches/patch-workflow_lookup_idx.sql" );
@@ -137,8 +144,8 @@ class FlowHooks {
 		$updater->modifyExtensionField( 'flow_revision', 'rev_change_type', "$dir/db_patches/patch-rev_change_type_update.sql" );
 		$updater->modifyExtensionField( 'recentchanges', 'rc_source', "$dir/db_patches/patch-rc_source.sql" );
 		$updater->modifyExtensionField( 'flow_revision', 'rev_change_type', "$dir/db_patches/patch-censor_to_suppress.sql" );
-		$updater->addExtensionField( 'flow_workflow', 'workflow_user_ip', "$dir/db_patches/patch-remove_usernames.sql" );
-		$updater->addExtensionField( 'flow_workflow', 'workflow_user_wiki', "$dir/db_patches/patch-add-wiki.sql" );
+		$updater->addExtensionField( 'flow_revision', 'rev_user_ip', "$dir/db_patches/patch-remove_usernames.sql" );
+		$updater->addExtensionField( 'flow_revision', 'rev_user_wiki', "$dir/db_patches/patch-add-wiki.sql" );
 		$updater->addExtensionIndex( 'flow_tree_revision', 'flow_tree_descendant_rev_id', "$dir/db_patches/patch-flow_tree_idx_fix.sql" );
 		$updater->dropExtensionField( 'flow_tree_revision', 'tree_orig_create_time', "$dir/db_patches/patch-tree_orig_create_time.sql" );
 		$updater->addExtensionIndex( 'flow_revision', 'flow_revision_user', "$dir/db_patches/patch-revision_user_idx.sql" );
@@ -146,6 +153,8 @@ class FlowHooks {
 		$updater->addExtensionField( 'flow_revision', 'rev_type_id', "$dir/db_patches/patch-rev_type_id.sql" );
 		$updater->addExtensionTable( 'flow_ext_ref', "$dir/db_patches/patch-add-linkstables.sql" );
 		$updater->dropExtensionTable( 'flow_definition', "$dir/db_patches/patch-drop_definition.sql" );
+		$updater->dropExtensionField( 'flow_workflow', 'workflow_user_ip', "$dir/db_patches/patch-drop_workflow_user.sql" );
+		$updater->addExtensionField( 'flow_revision', 'rev_content_length', "$dir/db_patches/patch-add-revision-content-length.sql" );
 
 		require_once __DIR__.'/maintenance/FlowUpdateRecentChanges.php';
 		$updater->addPostDatabaseUpdateMaintenance( 'FlowUpdateRecentChanges' );
@@ -161,7 +170,7 @@ class FlowHooks {
 		 * having executed this.
 		 */
 		if ( $updater->updateRowExists( 'FlowSetUserIp' ) ) {
-			$updater->dropExtensionField( 'flow_workflow', 'workflow_user_text', "$dir/db_patches/patch-remove_usernames_2.sql" );
+			$updater->dropExtensionField( 'flow_revision', 'rev_user_text', "$dir/db_patches/patch-remove_usernames_2.sql" );
 		}
 
 		require_once __DIR__.'/maintenance/FlowUpdateUserWiki.php';
@@ -172,6 +181,9 @@ class FlowHooks {
 
 		require_once __DIR__.'/maintenance/FlowPopulateLinksTables.php';
 		$updater->addPostDatabaseUpdateMaintenance( 'FlowPopulateLinksTables' );
+
+		require_once __DIR__.'/maintenance/FlowUpdateRevisionContentLength.php';
+		$updater->addPostDatabaseUpdateMaintenance( 'FlowUpdateRevisionContentLength' );
 
 		return true;
 	}
@@ -292,7 +304,7 @@ class FlowHooks {
 			if ( $rcType !== RC_FLOW ) {
 				return true;
 			}
-		} elseif ( $source !== Flow\Data\RecentChanges\RecentChanges::SRC_FLOW ) {
+		} elseif ( $source !== Flow\Data\Listener\RecentChangesListener::SRC_FLOW ) {
 			return true;
 		}
 
@@ -521,15 +533,10 @@ class FlowHooks {
 	}
 
 	public static function onResourceLoaderGetConfigVars( &$vars ) {
-		global $wgFlowEditorList, $wgFlowDefaultLimit, $wgFlowMaxLimit;
+		global $wgFlowEditorList, $wgFlowMaxLimit;
 
 		$vars['wgFlowEditorList'] = $wgFlowEditorList;
 		$vars['wgFlowMaxTopicLength'] = Flow\Model\PostRevision::MAX_TOPIC_LENGTH;
-		$vars['wgFlowPageSize'] = array(
-			'expanded' => $wgFlowDefaultLimit,
-			'collapsed-full' => min( $wgFlowDefaultLimit * 2, $wgFlowMaxLimit ),
-			'collapsed-oneline' => min( $wgFlowDefaultLimit * 3, $wgFlowMaxLimit ),
-		);
 
 		return true;
 	}
@@ -544,6 +551,9 @@ class FlowHooks {
 	 * @return bool
 	 */
 	public static function onContributionsLineEnding( $pager, &$ret, $row, &$classes ) {
+		global $wgHooks;
+		static $javascriptIncluded = false;
+
 		if ( !$row instanceof Flow\Formatter\FormatterRow ) {
 			return true;
 		}
@@ -565,6 +575,17 @@ class FlowHooks {
 
 		$classes[] = 'mw-flow-contribution';
 		$ret = $line;
+
+		// If we output one or more lines of contributions entries we also need to include
+		// the javascript that hooks into moderation actions.
+		// @todo not a huge fan of this static variable, what else though?
+		if ( !$javascriptIncluded ) {
+			$javascriptIncluded = true;
+			$wgHooks['SpecialPageAfterExecute'][] = function( $specialPage, $subPage ) {
+				$specialPage->getOutput()->addModules( array( 'ext.flow.contributions' ) );
+				$specialPage->getOutput()->addModuleStyles( array( 'ext.flow.contributions.styles' ) );
+			};
+		}
 
 		return true;
 	}
@@ -737,7 +758,7 @@ class FlowHooks {
 	 * @return bool
 	 */
 	public static function onCheckUserInsertForRecentChange( RecentChange $rc, array &$rcRow ) {
-		if ( $rc->getAttribute( 'rc_source' ) !== Flow\Data\RecentChanges\RecentChanges::SRC_FLOW ) {
+		if ( $rc->getAttribute( 'rc_source' ) !== Flow\Data\Listener\RecentChangesListener::SRC_FLOW ) {
 			return true;
 		}
 
@@ -759,7 +780,7 @@ class FlowHooks {
 	}
 
 	public static function onIRCLineURL( &$url, &$query, RecentChange $rc ) {
-		if ( $rc->getAttribute( 'rc_source' ) !== Flow\Data\RecentChanges\RecentChanges::SRC_FLOW ) {
+		if ( $rc->getAttribute( 'rc_source' ) !== Flow\Data\Listener\RecentChangesListener::SRC_FLOW ) {
 			return true;
 		}
 
@@ -770,7 +791,8 @@ class FlowHooks {
 			$formatter = Container::get( 'formatter.irclineurl' );
 			$result = $formatter->format( $rc );
 		} catch ( Exception $e ) {
-			wfDebugLog( 'Flow', __METHOD__ . ': Failed formatting rc ' . $rc->getAttribute( 'rc_id' ) );
+			wfDebugLog( 'Flow', __METHOD__ . ': Failed formatting rc ' . $rc->getAttribute( 'rc_id' )
+				. ': ' . $e->getMessage() );
 			MWExceptionHandler::logException( $e );
 		}
 		restore_error_handler();
@@ -1074,6 +1096,17 @@ class FlowHooks {
 		/** @var Flow\Data\Utils\UserMerger $merger */
 		$merger = Container::get( 'user_merger' );
 		$merger->finalizeMerge( $oldUser->getId(), $newUser->getId() );
+
+		return true;
+	}
+
+	/**
+	 * Gives precedence to Flow over LQT.
+	 */
+	public static function onIsLiquidThreadsPage( Title $title, &$isLqtPage ) {
+		if ( $isLqtPage && self::$occupationController->isTalkpageOccupied( $title ) ) {
+			$isLqtPage = false;
+		}
 
 		return true;
 	}

@@ -59,6 +59,11 @@ class RevisionFormatter {
 	protected $includeProperties = false;
 
 	/**
+	 * @var bool
+	 */
+	protected $includeContent = true;
+
+	/**
 	 * @var string[]
 	 */
 	protected $allowedContentFormats = array( 'html', 'wikitext' );
@@ -129,6 +134,15 @@ class RevisionFormatter {
 		$this->includeProperties = (bool)$shouldInclude;
 	}
 
+	/**
+	 * Outputing content can be somehwat expensive, as most of the content is loaded
+	 * into DOMDocuemnts for processing of relidlinks and badimages.  Set this to false
+	 * if the content will not be used such as for recent changes.
+	 */
+	public function setIncludeContent( $shouldInclude ) {
+		$this->includeContent = (bool)$shouldInclude;
+	}
+
 	public function setContentFormat( $format, UUID $revisionId = null ) {
 		if ( false === array_search( $format, $this->allowedContentFormats ) ) {
 			throw new FlowException( "Unknown content format: $format" );
@@ -160,7 +174,7 @@ class RevisionFormatter {
 
 		/** @noinspection PhpUnusedLocalVariableInspection */
 		$section = new \ProfileSection( __METHOD__ );
-		$isContentAllowed = $this->permissions->isAllowed( $row->revision, 'view' );
+		$isContentAllowed = $this->includeContent && $this->permissions->isAllowed( $row->revision, 'view' );
 		$isHistoryAllowed = $isContentAllowed ?: $this->permissions->isAllowed( $row->revision, 'history' );
 
 		if ( !$isHistoryAllowed ) {
@@ -173,28 +187,35 @@ class RevisionFormatter {
 			'workflowId' => $row->workflow->getId()->getAlphadecimal(),
 			'revisionId' => $row->revision->getRevisionId()->getAlphadecimal(),
 			'timestamp' => $ts->getTimestamp( TS_MW ),
-			'timestamp_readable' => $language->userTimeAndDate( $ts, $user ),
 			'changeType' => $row->revision->getChangeType(),
+			// @todo push all date formatting to the render side?
 			'dateFormats' => $this->getDateFormats( $row->revision, $ctx ),
 			'properties' => $this->buildProperties( $row->workflow->getId(), $row->revision, $ctx, $row ),
+			'isOriginalContent' => $row->revision->isOriginalContent(),
 			'isModerated' => $moderatedRevision->isModerated(),
 			// These are read urls
 			'links' => $this->buildLinks( $row ),
 			// These are write urls
 			'actions' => $this->buildActions( $row ),
 			'size' => array(
-				'old' => strlen( $row->previousRevision ? $row->previousRevision->getContentRaw() : '' ),
-				'new' => strlen( $row->revision->getContentRaw() ),
+				'old' => $row->revision->getPreviousContentLength(),
+				'new' => $row->revision->getContentLength(),
 			),
 			'author' => $this->serializeUser(
 				$row->revision->getUserWiki(),
 				$row->revision->getUserId(),
 				$row->revision->getUserIp()
 			),
+			'lastEditUser' => $this->serializeUser(
+				$row->revision->getLastContentEditUserWiki(),
+				$row->revision->getLastContentEditUserId(),
+				$row->revision->getLastContentEditUserIp()
+			),
+			'lastEditId' => $row->revision->isOriginalContent() ? null : $row->revision->getLastContentEditId()->getAlphadecimal(),
+			'previousRevisionId' => $row->revision->isFirstRevision()
+				? null
+				: $row->revision->getPrevRevisionId()->getAlphadecimal(),
 		);
-
-		$prevRevId = $row->revision->getPrevRevisionId();
-		$res['previousRevisionId'] = $prevRevId ? $prevRevId->getAlphadecimal() : null;
 
 		if ( $res['isModerated'] ) {
 			$res['moderator'] = $this->serializeUser(
@@ -211,27 +232,14 @@ class RevisionFormatter {
 		}
 
 		if ( $isContentAllowed ) {
-
 			// topic titles are always forced to plain text
 			$contentFormat = $this->decideContentFormat( $row->revision );
 
-			$res += array(
-				// @todo better name?
-				'content' => array(
-					'content' => $this->templating->getContent( $row->revision, $contentFormat ),
-					'format' => $contentFormat
-				),
-				'size' => array(
-					'old' => null,
-					// @todo this isn't really correct
-					'new' => strlen( $row->revision->getContentRaw() ),
-				),
+			// @todo better name?
+			$res['content'] = array(
+				'content' => $this->templating->getContent( $row->revision, $contentFormat ),
+				'format' => $contentFormat
 			);
-			if ( $row->previousRevision
-				&& $this->permissions->isAllowed( $row->previousRevision, 'view' )
-			) {
-				$res['size']['old'] = strlen( $row->previousRevision->getContentRaw() );
-			}
 		}
 
 		if ( $row instanceof TopicRow ) {

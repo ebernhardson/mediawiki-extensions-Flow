@@ -3,7 +3,7 @@
 namespace Flow\Formatter;
 
 use Flow\Data\ManagerGroup;
-use Flow\Data\RecentChanges\RecentChanges as RecentChangesHandler; // not to be confused with RecentChanges in Flow\Formatter namespace
+use Flow\Data\Listener\RecentChangesListener;
 use Flow\Exception\FlowException;
 use Flow\FlowActions;
 use Flow\Model\UUID;
@@ -48,7 +48,7 @@ class RecentChangesQuery extends AbstractQuery {
 	public function loadMetadataBatch( $rows, $isWatchlist = false ) {
 		$needed = array();
 		foreach ( $rows as $row ) {
-			if ( !isset( $row->rc_source ) || $row->rc_source !== RecentChangesHandler::SRC_FLOW ) {
+			if ( !isset( $row->rc_source ) || $row->rc_source !== RecentChangesListener::SRC_FLOW ) {
 				continue;
 			}
 			if ( !isset( $row->rc_params ) ) {
@@ -144,6 +144,9 @@ class RecentChangesQuery extends AbstractQuery {
 
 	/**
 	 * Determines if a flow record should be displayed in Special:Watchlist
+	 *
+	 * @param array $changeData
+	 * @return bool
 	 */
 	protected function isRecordHidden( array $changeData ) {
 		if ( $this->extendWatchlist ) {
@@ -162,10 +165,13 @@ class RecentChangesQuery extends AbstractQuery {
 		switch ( $action ) {
 			case 'create-header':
 			case 'edit-header':
-				if ( isset( $this->displayStatus['header-' . $changeData['workflow']] ) ) {
+				if (
+					isset( $this->displayStatus['header-' . $changeData['workflow']] ) &&
+					$this->displayStatus['header-' . $changeData['workflow']] !== $changeData['revision']
+				) {
 					return true;
 				}
-				$this->displayStatus['header-' . $changeData['workflow']] = true;
+				$this->displayStatus['header-' . $changeData['workflow']] = $changeData['revision'];
 			break;
 
 			case 'hide-post':
@@ -186,10 +192,13 @@ class RecentChangesQuery extends AbstractQuery {
 			case 'edit-title':
 			case 'create-topic-summary':
 			case 'edit-topic-summary':
-				if ( isset( $this->displayStatus['topic-' . $changeData['workflow']] ) ) {
+				if (
+					isset( $this->displayStatus['topic-' . $changeData['workflow']] ) &&
+					$this->displayStatus['topic-' . $changeData['workflow']] !== $changeData['revision']
+				) {
 					return true;
 				}
-				$this->displayStatus['topic-' . $changeData['workflow']] = true;
+				$this->displayStatus['topic-' . $changeData['workflow']] = $changeData['revision'];
 			break;
 		}
 

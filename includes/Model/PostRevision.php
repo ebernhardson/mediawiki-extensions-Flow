@@ -6,6 +6,7 @@ use Flow\Collection\PostCollection;
 use Flow\Container;
 use Flow\Exception\DataModelException;
 use Flow\Repository\TreeRepository;
+use Title;
 use User;
 
 class PostRevision extends AbstractRevision {
@@ -80,13 +81,12 @@ class PostRevision extends AbstractRevision {
 	 * an existing post(incl topic root) should use self::reply.
 	 *
 	 * @param Workflow $topic
+	 * @param User $user
 	 * @param string $content The title of the topic(they are Collection as well)
 	 * @return PostRevision
 	 */
-	static public function create( Workflow $topic, $content ) {
-		// @todo pass tuple instead?
-		$user = $topic->getUserTuple()->createUser();
-		$obj = static::newFromId( $topic->getId(), $user, $content );
+	static public function create( Workflow $topic, User $user, $content ) {
+		$obj = static::newFromId( $topic->getId(), $user, $content, $topic->getArticleTitle() );
 
 		$obj->changeType = 'new-post';
 		// A newly created post has no children, a depth of 0, and
@@ -101,21 +101,27 @@ class PostRevision extends AbstractRevision {
 	/**
 	 * DO NOT USE THIS METHOD!
 	 *
-	 * Seriously, you probably don't want to use this method. Although it's kind
-	 * of similar to Title::newFrom* or User::newFrom*, chances are slim to none
+	 * Seriously, you probably don't want to use this method, except from within
+	 * this class.
+	 *
+	 * Although it may seem similar to Title::newFrom* or User::newFrom*, chances are slim to none
 	 * that this will do what you'd expect.
+	 *
 	 * Unlike Title & User etc, a post is not something some object that can be
 	 * used in isolation: a post should always be retrieved via it's parents,
 	 * via a workflow, ...
-	 * The only reason we have this method is so that, when failing to load a
+	 *
+	 * The only reasons we have this method are for creating root posts
+	 * (called from PostRevision->create), and so when failing to load a
 	 * post, we can create a stub object.
 	 *
 	 * @param UUID $uuid
 	 * @param User $user
 	 * @param string $content
+	 * @param Title|null $title
 	 * @return PostRevision
 	 */
-	static public function newFromId( UUID $uuid, User $user, $content ) {
+	static public function newFromId( UUID $uuid, User $user, $content, Title $title = null ) {
 		$obj = new self;
 		$obj->revId = UUID::create();
 		$obj->postId = $uuid;
@@ -125,7 +131,7 @@ class PostRevision extends AbstractRevision {
 
 		$obj->setReplyToId( null ); // not a reply to anything
 		$obj->prevRevision = null; // no parent revision
-		$obj->setContent( $content );
+		$obj->setContent( $content, $title );
 
 		return $obj;
 	}
@@ -137,16 +143,16 @@ class PostRevision extends AbstractRevision {
 	 * @throws DataModelException
 	 */
 	static public function fromStorageRow( array $row, $obj = null ) {
-		if ( $row['rev_id'] !== $row['tree_rev_id'] ) {
+		/** @var $obj PostRevision */
+		$obj = parent::fromStorageRow( $row, $obj );
+		$treeRevId = UUID::create( $row['tree_rev_id'] );
+		if ( ! $obj->revId->equals( $treeRevId ) ) {
 			throw new DataModelException(
 				'tree revision doesn\'t match provided revision: '
-					. $row['tree_rev_id'] . ' != ' . $row['rev_id'],
+					. $treeRevId->getAlphadecimal() . ' != ' . $obj->revId->getAlphadecimal(),
 				'process-data'
 			);
 		}
-		/** @var $obj PostRevision */
-		$obj = parent::fromStorageRow( $row, $obj );
-
 		$obj->replyToId = UUID::create( $row['tree_parent_id'] );
 		$obj->postId = UUID::create( $row['rev_type_id'] );
 		$obj->origUser = UserTuple::newFromArray( $row, 'tree_orig_user_' );
@@ -181,8 +187,12 @@ class PostRevision extends AbstractRevision {
 	 */
 	public function reply( Workflow $workflow, User $user, $content, $changeType = 'reply' ) {
 		$reply = new self;
-		// No great reason to create two uuid's,  a post and its first revision can share a uuid
+
+		// UUIDs should not be reused for different entities/entity types in the future.
+		// (It is also inconsistent with newFromId, which uses separate ones.)
+		// This may be changed here in the future.
 		$reply->revId = $reply->postId = UUID::create();
+
 		$reply->user = UserTuple::newFromUser( $user );
 		$reply->origUser = $reply->user;
 		$reply->replyToId = $this->postId;

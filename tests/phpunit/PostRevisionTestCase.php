@@ -2,6 +2,7 @@
 
 namespace Flow\Tests;
 
+use DeferredUpdates;
 use Flow\Container;
 use Flow\Data\Index\BoardHistoryIndex;
 use Flow\Data\Listener\NotificationListener;
@@ -12,6 +13,7 @@ use Flow\Model\PostRevision;
 use Flow\Model\Workflow;
 use Flow\Model\UserTuple;
 use Flow\Model\UUID;
+use SplQueue;
 use User;
 
 /**
@@ -39,6 +41,9 @@ class PostRevisionTestCase extends FlowTestCase {
 		Container::reset();
 		$this->generateWorkflowForPost();
 		$this->revision = $this->generateObject();
+		// Revisions must be blanked here otherwise phpunit run with --repeat will remember
+		// ths revision list between multiple invocations of the test causing issues.
+		$this->revisions = array();
 	}
 
 	/**
@@ -107,6 +112,8 @@ class PostRevisionTestCase extends FlowTestCase {
 			'rev_edit_user_wiki' => null,
 			'rev_edit_user_id' => null,
 			'rev_edit_user_ip' => null,
+			'rev_content_length' => 0,
+			'rev_previous_content_length' => 0,
 
 			// flow_tree_revision
 			'tree_rev_descendant_id' => $this->workflow->getId()->getBinary(),
@@ -138,9 +145,6 @@ class PostRevisionTestCase extends FlowTestCase {
 			'workflow_page_id' => 1,
 			'workflow_namespace' => NS_USER_TALK,
 			'workflow_title_text' => 'Test',
-			'workflow_user_wiki' => $tuple->wiki,
-			'workflow_user_id' => $tuple->id,
-			'workflow_user_ip' => $tuple->ip,
 			'workflow_lock_state' => 0,
 			'workflow_last_update_timestamp' => wfTimestampNow(),
 		);
@@ -187,16 +191,32 @@ class PostRevisionTestCase extends FlowTestCase {
 			)
 		);
 
+		/** @var SplQueue $deferredQueue */
+		$deferredQueue = Container::get( 'deferred_queue' );
+		while( !$deferredQueue->isEmpty() ) {
+			try {
+				DeferredUpdates::addCallableUpdate( $deferredQueue->dequeue() );
+
+				// doing updates 1 by 1 so an exception doesn't break others in
+				// the queue
+				DeferredUpdates::doUpdates();
+			} catch ( \MWException $e ) {
+				// ignoring exceptions for now, not all are phpunit-proof yet
+			}
+		}
+
 		// save for removal at end of tests
 		$this->revisions[] = $revision;
 	}
 
 	protected function clearExtraLifecycleHandlers() {
 		$c = Container::getContainer();
-		foreach ( array( 'header', 'post' ) as $kind ) {
-			$key = "storage.$kind.lifecycle-handlers";
-			$c[$key] = array_filter(
-				$c[$key],
+		foreach( array_unique( $c['storage.manager_list'] ) as $key ) {
+			if ( !isset( $c["$key.listeners"] ) ) {
+				continue;
+			}
+			$c["$key.listeners"] = array_filter(
+				$c["$key.listeners"],
 				function( $handler ) {
 					// Recent changes logging is outside the scope of this test, and
 					// causes interaction issues

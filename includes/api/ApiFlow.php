@@ -95,7 +95,12 @@ class ApiFlow extends ApiBase {
 		/** @var Flow\TalkpageManager $controller */
 		$controller = Container::get( 'occupation_controller' );
 		if ( !$controller->isTalkpageOccupied( $page ) ) {
-			$this->dieUsage( 'Page provided does not have Flow enabled', 'invalid-page' );
+			// just check for permissions, nothing else to do. if the commit
+			// is successfull the OccupationListener will see the new revision
+			// and put the flow board in place.
+			if ( !$controller->isCreationAllowed( $page, $this->getUser() ) ) {
+				$this->dieUsage( 'Page provided does not have Flow enabled', 'invalid-page' );
+			}
 		}
 
 		return $page;
@@ -106,6 +111,7 @@ class ApiFlow extends ApiBase {
 		if ( $mainParams['action'][ApiBase::PARAM_TYPE] === 'submodule' ) {
 			$submodulesType = 'submodule';
 		} else {
+			/** @todo Remove this case once support for older MediaWiki is dropped */
 			$submodulesType = $this->moduleManager->getNames( 'submodule' );
 		}
 
@@ -125,10 +131,16 @@ class ApiFlow extends ApiBase {
 		);
 	}
 
+	/**
+	 * @deprecated since MediaWiki core 1.25
+	 */
 	public function getDescription() {
 		return 'Allows actions to be taken on Flow pages.';
 	}
 
+	/**
+	 * @deprecated since MediaWiki core 1.25
+	 */
 	public function getParamDescription() {
 		return array(
 			'submodule' => 'The Flow submodule to invoke',
@@ -189,10 +201,23 @@ class ApiFlow extends ApiBase {
 		);
 	}
 
+	/**
+	 * @deprecated since MediaWiki core 1.25
+	 */
 	public function getExamples() {
 		 return array(
 			 'api.php?action=flow&submodule=edit-header&page=Talk:Sandbox&ehprev_revision=???&ehcontent=Nice%20to&20meet%20you',
 		 );
+	}
+
+	/**
+	 * @see ApiBase::getExamplesMessages()
+	 */
+	protected function getExamplesMessages() {
+		return array(
+			'action=flow&submodule=edit-header&page=Talk:Sandbox&ehprev_revision=???&ehcontent=Nice%20to&20meet%20you'
+				=> 'apihelp-flow-example-1',
+		);
 	}
 
 	public function mustBePosted() {

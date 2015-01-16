@@ -51,6 +51,7 @@ class Pager {
 		$this->storage = $storage;
 		$this->query = $query;
 		$this->options = $options + array(
+			'pager-include-offset' => null,
 			'pager-offset' => null,
 			'pager-limit' => self::DEFAULT_LIMIT,
 			'pager-dir' => self::DEFAULT_DIRECTION,
@@ -95,12 +96,13 @@ class Pager {
 	 * @return PagerPage
 	 */
 	public function getPage( $filter = null ) {
-		$numRequested = $this->options['pager-limit'] + 1;
+		$numNeeded = $this->options['pager-limit'] + 1;
 		$options = $this->options + array(
 			// We need one item of leeway to determine if there are more items
-			'limit' => $numRequested,
+			'limit' => $numNeeded,
 			'offset-dir' => $this->options['pager-dir'],
 			'offset-id' => $this->options['pager-offset'],
+			'include-offset' => $this->options['pager-include-offset'],
 			'offset-elastic' => true,
 		);
 		$offset = $this->options['pager-offset'];
@@ -110,7 +112,7 @@ class Pager {
 		do {
 			if ( $queries === 2 ) {
 				// if we hit a third query ask for more items
-				$options['limit'] = min( self::MAX_LIMIT, $options['limit'] * 3 );
+				$options['limit'] = min( self::MAX_LIMIT, $this->options['pager-limit'] * 5 );
 			}
 
 			// Retrieve results
@@ -122,20 +124,30 @@ class Pager {
 				// nothing found
 				break;
 			}
-			$results = array_merge(
-				$results,
-				$filter ? call_user_func( $filter, $found ) : $found
-			);
+			$filtered = $filter ? call_user_func( $filter, $found ) : $found;
+			if ( $this->options['pager-dir'] === 'rev' ) {
+				// Paging A-Z with pager-offset F, pager-dir rev, pager-limit 2 gives
+				// DE on first query, BC on second, and A on third.  The output
+				// needs to be ABCDE
+				$results = array_merge( $filtered, $results );
+			} else {
+				$results = array_merge( $results, $filtered );
+			}
 
-			if ( count( $found ) !== $numRequested ) {
+			if ( count( $found ) !== $options['limit'] ) {
 				// last page
 				break;
 			}
 
 			// setup offset for next query
-			$offset = $this->storage->serializeOffset( end( $found ), $this->sort );
+			if ( $this->options['pager-dir'] === 'rev' ) {
+				$last = reset( $found );
+			} else {
+				$last = end( $found );
+			}
+			$offset = $this->storage->serializeOffset( $last, $this->sort );
 
-		} while ( count( $results ) < $numRequested && ++$queries < self::MAX_QUERIES );
+		} while ( count( $results ) < $numNeeded && ++$queries < self::MAX_QUERIES );
 
 		if ( $queries >= self::MAX_QUERIES ) {
 			$count = count( $results );

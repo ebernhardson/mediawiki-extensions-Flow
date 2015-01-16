@@ -82,7 +82,7 @@
 
 		/*
 		 * This is prev_revision in "generic" form. Each Flow API has its
-		 * own unique prefix, which (in FlowAPI.prototype.getQueryMap) will
+		 * own unique prefix, which (in FlowApi.prototype.getQueryMap) will
 		 * be properly applied for the respective API call; e.g.
 		 * epprev_revision (for edit post)
 		 */
@@ -98,8 +98,24 @@
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiPreHandlers.activateEditHeader = function () {
 		return {
-			submodule: "view-header", // href submodule is edit-header
-			vhcontentFormat: "wikitext" // href does not have this param
+			submodule: 'view-header', // href submodule is edit-header
+			vhcontentFormat: 'wikitext' // href does not have this param
+		};
+	};
+
+	/**
+	 * Before activating topic, sends an overrideObject to the API to modify the request params.
+	 *
+	 * @param {Event} event
+	 * @return {Object}
+	 */
+	FlowBoardComponentApiEventsMixin.UI.events.apiPreHandlers.activateEditTitle = function ( event ) {
+		// Use view-post API for topic as well; we only want this on
+		// particular (title) post revision, not the full topic
+		return {
+			submodule: "view-post",
+			vppostId: $( this ).closest( '.flow-topic' ).data( 'flow-id' ),
+			vpcontentFormat: "wikitext"
 		};
 	};
 
@@ -110,14 +126,14 @@
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiPreHandlers.activateEditPost = function ( event ) {
 		return {
-			submodule: "view-post",
+			submodule: 'view-post',
 			vppostId: $( this ).closest( '.flow-post' ).data( 'flow-id' ),
-			vpcontentFormat: "wikitext"
+			vpcontentFormat: 'wikitext'
 		};
 	};
 
 	/**
-	 * Adjusts query params to use global watch action, and appends the watch token.
+	 * Adjusts query params to use global watch action, and specifies it should use a watch token.
 	 * @param {Event} event
 	 * @returns {Function}
 	 */
@@ -126,7 +142,9 @@
 			var params = {
 				action: 'watch',
 				titles: queryMap.page,
-				token: mw.user.tokens.get( 'watchToken' )
+				_internal: {
+					tokenType: 'watch'
+				}
 			};
 			if ( queryMap.submodule === 'unwatch' ) {
 				params.unwatch = 1;
@@ -146,14 +164,19 @@
 	FlowBoardComponentApiEventsMixin.UI.events.apiPreHandlers.preview = function ( event ) {
 		var callback,
 			$this = $( this ),
-			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $this );
+			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $this ),
+			schemaName = $( this ).data( 'flow-eventlog-schema' ),
+			funnelId = $( this ).data( 'flow-eventlog-funnel-id' ),
+			logAction = $( this ).data( 'flow-return-to-edit' ) ? 'keep-editing' : 'preview';
+
+		flowBoard.logEvent( schemaName, { action: logAction, funnelId: funnelId } );
 
 		callback = function ( queryMap ) {
 			var content = null;
 
 			// XXX: Find the content parameter
 			$.each( queryMap, function( key, value ) {
-				var piece = key.substr( -7 );
+				var piece = key.slice( -7 );
 				if ( piece === 'content' || piece === 'summary' ) {
 					content = value;
 					return false;
@@ -195,7 +218,8 @@
 	FlowBoardComponentApiEventsMixin.UI.events.apiPreHandlers.activateSummarizeTopic = function ( event, info ) {
 		if ( info.$target.find( 'form' ).length ) {
 			// Form already open; cancel the old form
-			_flowBoardComponentCancelForm( info.$target );
+			var flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $( this ) );
+			flowBoard.emitWithReturn( 'cancelForm', info.$target );
 			return false;
 		}
 
@@ -230,17 +254,21 @@
 
 	/**
 	 * On complete board reprocessing through view-topiclist (eg. change topic sort order), re-render any given blocks.
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.board = function ( info, data, jqxhr ) {
 		var $rendered,
-			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $( this ) );
+			flowBoard = info.component,
+			dfd = $.Deferred();
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return dfd.reject().promise();
 		}
 
 		$rendered = $(
@@ -250,80 +278,28 @@
 			)
 		).children();
 
-		// Reinitialize the whole board with these nodes
-		flowBoard.reinitializeContainer( $rendered );
+		// Run this on a short timeout so that the other board handler in FlowBoardComponentLoadMoreFeatureMixin can run
+		// TODO: Using a timeout doesn't seem like the right way to do this.
+		setTimeout( function () {
+			// Reinitialize the whole board with these nodes
+			flowBoard.reinitializeContainer( $rendered );
+			dfd.resolve();
+		}, 50 );
+
+		return dfd.promise();
 	};
 
 	/**
-	 *
-	 * @param {Object} info (status:done|fail, $target: jQuery)
-	 * @param {Object} data
-	 * @param {jqXHR} jqxhr
-	 */
-	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.loadMore = function ( info, data, jqxhr ) {
-		var $tmp,
-			$target = $( this ).closest( '.flow-load-more' ),
-			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $target );
+	 * @returns {$.Promise}
 
-		if ( info.status !== 'done' ) {
-			// Error will be displayed by default, nothing else to wrap up
-			return;
-		}
-
-		// See bug 61097, Catch any random javascript error from
-		// parsoid so they don't break and stop the page
-		try {
-			// Render topiclist template
-			$target.before(
-				$tmp = $( flowBoard.constructor.static.TemplateEngine.processTemplateGetFragment(
-					'flow_topiclist_loop',
-					data.flow[ 'view-topiclist' ].result.topiclist
-				) ).children()
-			);
-
-			// Run loadHandlers
-			flowBoard.emitWithReturn( 'makeContentInteractive', $tmp );
-		} catch( e ) {
-			// nothing to do, just silently ignore the external error
-		}
-
-		// Render load more template
-		if ( data.flow[ 'view-topiclist'].result.topiclist.links.pagination.fwd ) {
-			$target.replaceWith(
-				$tmp = $( flowBoard.constructor.static.TemplateEngine.processTemplateGetFragment(
-					'flow_load_more',
-					data.flow[ 'view-topiclist' ].result.topiclist
-				) ).children()
-			);
-		} else {
-			$target.replaceWith(
-				$tmp = $( flowBoard.constructor.static.TemplateEngine.processTemplateGetFragment(
-					'flow_no_more',
-					{}
-				) ).children()
-			);
-		}
-
-		// Run loadHandlers
-		flowBoard.emitWithReturn( 'makeContentInteractive', $tmp );
-
-		// Remove the old load button (necessary if the above load_more template returns nothing)
-		$target.remove();
-
-		/*
-		 * Fire infinite scroll check again - if no (or few) topics were
-		 * added (e.g. because they're moderated), we should immediately
-		 * fetch more instead of waiting for the user to scroll again (when
-		 * there's no reason to scroll)
-		 */
-		flowBoard.emitWithReturn( 'scroll' );
-	};
-
-	/**
+		return $.Deferred().resolve().promise();
 	 * Renders the editable board header with the given API response.
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.activateEditHeader = function ( info, data, jqxhr ) {
 		var $rendered,
@@ -332,7 +308,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default & edit conflict handled, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		// Change "header" to "header_edit" so that it loads up flow_block_header_edit
@@ -352,6 +328,8 @@
 
 		// Reinitialize the whole board with these nodes, and hold onto the replaced header
 		$oldBoardNodes = flowBoard.reinitializeContainer( $rendered );
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
@@ -359,6 +337,7 @@
 	 * @param {Object} info (status:done|fail, $target: jQuery)
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Deferred}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.submitHeader = function ( info, data, jqxhr ) {
 		var $rendered,
@@ -366,7 +345,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default & edit conflict handled, nothing else to wrap up
-			return;
+			return $.Deferred().reject();
 		}
 
 		$rendered = $(
@@ -378,6 +357,8 @@
 
 		// Reinitialize the whole board with these nodes
 		flowBoard.reinitializeContainer( $rendered );
+
+		return $.Deferred().resolve();
 	};
 
 	/**
@@ -386,6 +367,7 @@
 	 * @param {Object} info
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.activateLockTopic = function ( info, data ) {
 		var result, revision, postId, revisionId,
@@ -397,7 +379,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default & edit conflict handled, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		// FIXME: API should take care of this for me.
@@ -413,6 +395,10 @@
 
 		// Ensure that on a cancel the form gets destroyed.
 		flowBoard.emitWithReturn( 'addFormCancelCallback', $target.find( 'form' ), function () {
+			// xxx: Can this use replaceWith()? If so, use it because it saves the browser
+			// from having to reflow the document view twice (once with both elements on the
+			// page and then again after its removed, which causes bugs like losing your
+			// scroll offset on long pages).
 			$target.before( $old ).remove();
 		} );
 
@@ -423,6 +409,8 @@
 
 		// Focus on first form field
 		$target.find( 'input, textarea' ).filter( ':visible:first' ).focus();
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
@@ -431,17 +419,19 @@
 	 * @param {String} status
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.lockTopic = function ( info, data ) {
 		var $replacement,
 			$target = info.$target,
 			$this = $( this ),
+			$deferred = $.Deferred(),
 			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $this ),
 			flowId = $this.closest( '.flow-topic' ).data( 'flow-id' );
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default & edit conflict handled, nothing else to wrap up
-			return;
+			return $deferred.reject().promise();
 		}
 
 		// We couldn't make lock-topic to return topic data after a successful
@@ -456,12 +446,19 @@
 		// could then import that and continuously update it with new revisions from
 		// api calls.  Rendering a topic would then just be pointing the template at
 		// the right part of that data instead of requesting it.
-		flowBoard.API.apiCall( {
+		flowBoard.Api.apiCall( {
 			action: 'flow',
 			submodule: 'view-topic',
 			workflow: flowId,
 			// Flow topic title, in Topic:<topicId> format (2600 is topic namespace id)
 			page: mw.Title.newFromText( flowId, 2600 ).getPrefixedDb()
+			// @todo fixme
+			// - mw.Title.newFromText can return null. If you're not going to check its return
+			//   value, use 'new mw.Title' instead so that you get an exception for 'invalid title'
+			//   instead of an exception for 'property of null'.
+			// - The second parameter to mw.Title is 'defaultNamespace' not 'namespace'.
+			//   E.g. mw.Title.newFromText( 'User:Example', 6 ) -> 'User:Example', not 'File:
+			//   If you need to prefix/enforce a namespace, use the canonical prefix instead.
 		} ).done( function( result ) {
 			// Update view of the full topic
 			$replacement = $( flowBoard.constructor.static.TemplateEngine.processTemplateGetFragment(
@@ -471,6 +468,8 @@
 
 			$target.replaceWith( $replacement );
 			flowBoard.emitWithReturn( 'makeContentInteractive', $replacement );
+
+			$deferred.resolve();
 		} ).fail( function( code, result ) {
 			/*
 			 * At this point, the lock/unlock actually worked, but failed
@@ -480,13 +479,20 @@
 			var errorMsg = flowBoard.constructor.static.getApiErrorMessage( code, result );
 			errorMsg = mw.msg( 'flow-error-fetch-after-open-lock', errorMsg );
 			flowBoard.emitWithReturn( 'showError', $target, errorMsg );
+
+			$deferred.reject();
 		} );
+
+		return $deferred.promise();
 	};
 
 	/**
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.submitTopicTitle = function( info, data, jqxhr ) {
 		var
@@ -497,9 +503,10 @@
 			$topic = info.$target,
 			$oldTopicTitleBar, $newTopicTitleBar,
 			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $this );
+
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default & edit conflict handled, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		$oldTopicTitleBar = $topic.find( '.flow-topic-titlebar' );
@@ -517,21 +524,26 @@
 		flowBoard.emitWithReturn( 'makeContentInteractive', $newTopicTitleBar );
 
 		$newTopicTitleBar.conditionalScrollIntoView();
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
 	 * After submit of the topic title edit form, process the response.
 	 *
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.submitEditPost = function( info, data, jqxhr ) {
 		var result;
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default & edit conflict handled, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		result = data.flow['edit-post'].result.topic;
@@ -540,6 +552,8 @@
 		result.submitted = {};
 
 		_flowBoardComponentRefreshTopic( info.$target, result );
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
@@ -547,6 +561,7 @@
 	 * @param {Object} info (status:done|fail, $target: jQuery)
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.preview = function( info, data, jqxhr ) {
 		var revision, creator,
@@ -565,7 +580,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		creator = {
@@ -650,76 +665,100 @@
 
 		// Hide cancel button on preview screen
 		$cancelButton.hide();
+
 		// Assign the reset-preview information for later use
 		$button
 			.data( 'flow-return-to-edit', {
 				text: $button.text(),
-				$nodes: $previewContainer
+				$nodes: $previewContainer,
 			} )
-			.text( flowBoard.constructor.static.TemplateEngine.l10n('flow-preview-return-edit-post') )
-			.click( function() {
+			.text( flowBoard.constructor.static.TemplateEngine.l10n( 'flow-preview-return-edit-post' ) )
+			.one( 'click', function() {
 				$cancelButton.show();
 			} );
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
 	 * After submitting a new topic, process the response.
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.newTopic = function ( info, data, jqxhr ) {
-		var result, html,
+		var result, fragment,
+			schemaName = $( this ).data( 'flow-eventlog-schema' ),
+			funnelId = $( this ).data( 'flow-eventlog-funnel-id' ),
 			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $( this ) );
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
+
+		flowBoard.logEvent( schemaName, { action: 'save-success', funnelId: funnelId } );
 
 		result = data.flow['new-topic'].result.topiclist;
 
 		// render only the new topic
 		result.roots = [result.roots[0]];
-		html = mw.flow.TemplateEngine.processTemplateGetFragment( 'flow_topiclist_loop', result );
+		fragment = mw.flow.TemplateEngine.processTemplateGetFragment( 'flow_topiclist_loop', result );
 
-		_flowBoardComponentCancelForm( $( this ).closest( 'form' ) );
+		flowBoard.emitWithReturn( 'cancelForm', $( this ).closest( 'form' ) );
 
 		// Everything must be reset before re-initializing
 		// @todo un-hardcode
 		flowBoard.reinitializeContainer(
-			flowBoard.$container.find( '.flow-topics' ).prepend( $( html ) )
+			flowBoard.$container.find( '.flow-topics' ).prepend( fragment )
 		);
 
 		// remove focus - title input field may still have focus
 		// (submitted via enter key), which it needs to lose:
 		// the form will only re-activate if re-focused
 		document.activeElement.blur();
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
 	 * @param {Object} info (status:done|fail, $target: jQuery)
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.submitReply = function ( info, data, jqxhr ) {
-		var $form = $( this ).closest( 'form' );
+		var $form = $( this ).closest( 'form' ),
+			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $form ),
+			schemaName = $( this ).data( 'flow-eventlog-schema' ),
+			funnelId = $( this ).data( 'flow-eventlog-funnel-id' );
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
-		_flowBoardComponentCancelForm( $form );
+		flowBoard.logEvent( schemaName, { action: 'save-success', funnelId: funnelId } );
+
+		// Execute cancel callback to destroy form
+		flowBoard.emitWithReturn( 'cancelForm', $form );
 
 		// Target should be flow-topic
 		_flowBoardComponentRefreshTopic( info.$target, data.flow.reply.result.topic );
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.watchItem = function ( info, data, jqxhr ) {
 		var watchUrl, unwatchUrl,
@@ -733,7 +772,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		if ( $tooltipTarget.is( '.flow-topic-watchlist' ) ) {
@@ -770,6 +809,8 @@
 			// Successful watch: show tooltip
 			flowBoard.emitWithReturn( 'showSubscribedTooltip', $newLink.find( '.wikiglyph' ), watchType );
 		}
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
@@ -777,6 +818,7 @@
 	 * @param {Object} info (status:done|fail, $target: jQuery)
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.activateSummarizeTopic = function ( info, data, jqxhr ) {
 		var $target = info.$target,
@@ -785,7 +827,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		// Create the new topic_summary_edit template
@@ -806,13 +848,18 @@
 
 		// Focus on first form field
 		$target.find( 'input, textarea' ).filter( ':visible:first' ).focus();
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
 	 * After submit of the summarize topic edit form, process the new topic summary data.
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.summarizeTopic = function ( info, data, jqxhr ) {
 		var $this = $( this ),
@@ -822,7 +869,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		$target.replaceWith( $(
@@ -838,13 +885,77 @@
 
 		// Delete the form
 		$form.remove();
+
+		return $.Deferred().resolve().promise();
+	};
+
+	/**
+	 * Shows the form for editing a topic title, it's not already showing.
+	 *
+	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} data
+	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
+	 */
+	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.activateEditTitle = function ( info, data, jqxhr ) {
+		var flowBoard, $form, cancelCallback,
+			$link = $( this ),
+			activeClass = 'flow-topic-title-activate-edit',
+			rootBlock = data.flow['view-post'].result.topic,
+			revision = rootBlock.revisions[rootBlock.posts[rootBlock.roots[0]]];
+
+		if ( info.status !== 'done' ) {
+			// Error will be displayed by default, nothing else to wrap up
+			return $.Deferred().reject().promise();
+		}
+
+		$form = info.$target.find( 'form' );
+
+		if ( $form.length === 0 ) {
+			// Add class to identify title is being edited (so we can hide the
+			// current title in CSS)
+			info.$target.addClass( activeClass );
+
+			cancelCallback = function() {
+				$form.remove();
+				info.$target.removeClass( activeClass );
+			};
+
+			flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $link );
+			$form = $( flowBoard.constructor.static.TemplateEngine.processTemplateGetFragment(
+				'flow_edit_topic_title',
+				{
+					'actions' : {
+						'edit' : {
+							'url' : $link.attr( 'href' )
+						}
+					},
+					'content': {
+						'content' : revision.content.content
+					},
+					'revisionId' : revision.revisionId
+				}
+			) ).children();
+
+			flowBoard.emitWithReturn( 'addFormCancelCallback', $form, cancelCallback );
+			$form
+				.data( 'flow-initial-state', 'hidden' )
+				.prependTo( info.$target );
+		}
+
+		$form.find( '.mw-ui-input' ).focus();
+
+		return $.Deferred().resolve().promise();
 	};
 
 	/**
 	 * Renders the editable post with the given API response.
-	 * @param {Object} info (status:done|fail, $target: jQuery)
+	 * @param {Object} info
+	 * @param {string} info.status "done" or "fail"
+	 * @param {jQuery} info.$target
 	 * @param {Object} data
 	 * @param {jqXHR} jqxhr
+	 * @returns {$.Promise}
 	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.activateEditPost = function ( info, data, jqxhr ) {
 		var $rendered, rootBlock,
@@ -853,7 +964,7 @@
 
 		if ( info.status !== 'done' ) {
 			// Error will be displayed by default, nothing else to wrap up
-			return;
+			return $.Deferred().reject().promise();
 		}
 
 		// The API returns with the entire topic, but we only want to render the edit form
@@ -879,8 +990,13 @@
 
 		$post.replaceWith( $rendered );
 		$rendered.find( 'textarea' ).conditionalScrollIntoView().focus();
+
+		return $.Deferred().resolve().promise();
 	};
 
+	/**
+	 * Callback from the topic moderation dialog.
+	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.moderateTopic = _genModerateHandler(
 		'moderate-topic',
 		function ( $target, revision, apiResult ) {
@@ -900,10 +1016,25 @@
 		}
 	);
 
+	/**
+	 * Callback from the post moderation dialog.
+	 */
 	FlowBoardComponentApiEventsMixin.UI.events.apiHandlers.moderatePost = _genModerateHandler(
 		'moderate-post',
 		function ( $target, revision, apiResult ) {
-			_flowBoardComponentRefreshTopic( $target, apiResult );
+			var $replacement,
+				flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $( this ) );
+
+			if ( revision.isModerated ) {
+				$replacement = $( flowBoard.constructor.static.TemplateEngine.processTemplate(
+					'flow_moderate_post_confirmation',
+					revision
+				) );
+				$target.closest( '.flow-post-main' ).replaceWith( $replacement );
+				flowBoard.emitWithReturn( 'makeContentInteractive', $replacement );
+			} else {
+				_flowBoardComponentRefreshTopic( $target, apiResult );
+			}
 		}
 	);
 
@@ -924,46 +1055,31 @@
 		 * @param {Object} info (status:done|fail, $target: jQuery)
 		 * @param {Object} data
 		 * @param {jqXHR} jqxhr
+		 * @returns {$.Promise}
 		 */
 		return function ( info, data, jqxhr ) {
 			if ( info.status !== 'done' ) {
 				// Error will be displayed by default, nothing else to wrap up
-				return;
+				return $.Deferred().reject().promise();
 			}
 
 			var result = data.flow[action].result.topic,
-				$form = $( this ).closest( 'form' ),
-				id = result.submitted.postId || result.postId || result.roots[0];
+				$this = $( this ),
+				$form = $this.closest( 'form' ),
+				id = result.submitted.postId || result.postId || result.roots[0],
+				flowBoard = mw.flow.getPrototypeMethod( 'board', 'getInstanceByElement' )( $this );
 
 			successCallback.call(
 				this,
-				$form.data( 'flow-dialog-owner' ),
+				$form.data( 'flow-dialog-owner' ) || $form,
 				result.revisions[result.posts[id]],
 				result
 			);
 
-			_flowBoardComponentCancelForm( $form );
+			flowBoard.emitWithReturn( 'cancelForm', $form );
+
+			return $.Deferred().resolve().promise();
 		};
-	}
-
-	/**
-	 * If a form has a cancelForm handler, we clear the form and trigger it. This allows easy cleanup
-	 * and triggering of form events after successful API calls.
-	 * @param {jQuery} $form
-	 */
-	function _flowBoardComponentCancelForm( $form ) {
-		var $button = $form.find( 'button, input, a' ).filter( '[data-flow-interactive-handler="cancelForm"]' );
-
-		if ( $button.length ) {
-			// Clear contents to not trigger the "are you sure you want to
-			// discard your text" warning
-			$form.find( 'textarea, :text' ).each( function() {
-				$( this ).val( this.defaultValue );
-			} );
-
-			// Trigger a click on cancel to have it destroy the form the way it should
-			$button.trigger( 'click' );
-		}
 	}
 
 	/**

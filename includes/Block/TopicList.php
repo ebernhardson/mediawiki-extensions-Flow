@@ -5,6 +5,8 @@ namespace Flow\Block;
 use Flow\Container;
 use Flow\Data\Pager\Pager;
 use Flow\Data\Pager\PagerPage;
+use Flow\Exception\FlowException;
+use Flow\Formatter\TocTopicListFormatter;
 use Flow\Formatter\TopicListFormatter;
 use Flow\Formatter\TopicListQuery;
 use Flow\Model\PostRevision;
@@ -51,6 +53,13 @@ class TopicListBlock extends AbstractBlock {
 	 * @var PostRevision|null
 	 */
 	protected $firstPost;
+
+	/**
+	 * @var array
+	 *
+	 * Associative array mapping topic ID (in alphadecimal form) to PostRevision for the topic root.
+	 */
+	protected $topicRootRevisionCache = array();
 
 	protected function validate() {
 		// for now, new topic is considered a new post; perhaps some day topic creation should get it's own permissions?
@@ -102,9 +111,9 @@ class TopicListBlock extends AbstractBlock {
 	protected function create() {
 		$title = $this->workflow->getArticleTitle();
 		$user = $this->context->getUser();
-		$topicWorkflow = Workflow::create( 'topic', $user, $title );
+		$topicWorkflow = Workflow::create( 'topic', $title );
 		$topicListEntry = TopicListEntry::create( $this->workflow, $topicWorkflow );
-		$topicTitle = PostRevision::create( $topicWorkflow, $this->submitted['topic'] );
+		$topicTitle = PostRevision::create( $topicWorkflow, $user, $this->submitted['topic'] );
 
 		$firstPost = null;
 		if ( !empty( $this->submitted['content'] ) ) {
@@ -116,10 +125,6 @@ class TopicListBlock extends AbstractBlock {
 		return array( $topicWorkflow, $topicListEntry, $topicTitle, $firstPost );
 	}
 
-	/**
-	 * Create a new topic attached to the current topic list and write it
-	 * out to storage.
-	 */
 	public function commit() {
 		if ( $this->action !== 'new-topic' ) {
 			throw new FailCommitException( 'Unknown commit action', 'fail-commit' );
@@ -146,37 +151,47 @@ class TopicListBlock extends AbstractBlock {
 		$storage->put( $this->topicWorkflow, $metadata );
 
 		$output = array(
-			'created-topic-id' => $this->topicWorkflow->getId(),
-			'created-post-id' => $this->firstPost ? $this->firstPost->getRevisionId() : null,
+			'topic-page' => $this->topicWorkflow->getArticleTitle()->getPrefixedText(),
+			'topic-id' => $this->topicTitle->getPostId(),
+			'topic-revision-id' => $this->topicTitle->getRevisionId(),
+			'post-id' => $this->firstPost ? $this->firstPost->getPostId() : null,
+			'post-revision-id' => $this->firstPost ? $this->firstPost->getRevisionId() : null,
 		);
 
 		return $output;
 	}
 
-	public function renderAPI( array $options ) {
-		/** @var TopicListFormatter $serializer */
-		$serializer = Container::get( 'formatter.topiclist' );
+	public function renderApi( array $options ) {
 		$response = array(
 			'submitted' => $this->wasSubmitted() ? $this->submitted : $options,
 			'errors' => $this->errors,
 		);
 
-		if ( $this->workflow->isNew() ) {
-			return $response + $serializer->buildEmptyResult( $this->workflow );
+		// Repeating the default until we use the API for everything (bug 72659)
+		// Also, if this is removed other APIs (i.e. ApiFlowNewTopic) may need
+		// to be adjusted if they trigger a rendering of this block.
+		$isTocOnly = isset( $options['toconly'] ) ? $options['toconly'] : false;
+
+		if ( $isTocOnly ) {
+			/** @var TocTopicListFormatter $serializer */
+			$serializer = Container::get( 'formatter.topiclist.toc' );
+		} else {
+			/** @var TopicListFormatter $serializer */
+			$serializer = Container::get( 'formatter.topiclist' );
 		}
 
 		// @todo remove the 'api' => true, its always api
 		$findOptions = $this->getFindOptions( $options + array( 'api' => true ) );
-		$page = $this->getPage( $findOptions );
 
-		// sortby option
-		if ( isset( $findOptions['sortby'] ) ) {
-			$response['sortby'] = $findOptions['sortby'];
-		// default is newest
-		} else {
-			$response['sortby'] = '';
+		// include the current sortby option.  Note that when 'user' is either
+		// submitted or defaulted to this is the resulting sort. ex: newest
+		$response['sortby'] = $findOptions['sortby'];
+
+		if ( $this->workflow->isNew() ) {
+			return $response + $serializer->buildEmptyResult( $this->workflow );
 		}
 
+		$page = $this->getPage( $findOptions );
 		$workflowIds = array();
 		/** @var TopicListEntry $topicListEntry */
 		foreach ( $page->getResults() as $topicListEntry ) {
@@ -184,6 +199,22 @@ class TopicListBlock extends AbstractBlock {
 		}
 
 		$workflows = $this->storage->getMulti( 'Workflow', $workflowIds );
+
+		if ( $isTocOnly ) {
+			// We don't need any further data, so we skip the TopicListQuery.
+
+			$topicRootRevisionsByWorkflowId = array();
+			$workflowsByWorkflowId = array();
+
+			foreach ( $workflows as $workflow ) {
+				$alphaWorkflowId = $workflow->getId()->getAlphadecimal();
+				$topicRootRevisionsByWorkflowId[$alphaWorkflowId] = $this->topicRootRevisionCache[$alphaWorkflowId];
+				$workflowsByWorkflowId[$alphaWorkflowId] = $workflow;
+			}
+
+			return $response + $serializer->formatApi( $this->workflow, $topicRootRevisionsByWorkflowId, $workflowsByWorkflowId, $page );
+		}
+
 		/** @var TopicListQuery $query */
 		$query = Container::get( 'query.topiclist' );
 		$found = $query->getResults( $page->getResults() );
@@ -216,51 +247,80 @@ class TopicListBlock extends AbstractBlock {
 		// Compute offset/limit
 		$limit = $this->getLimit( $requestOptions );
 
-		if ( isset( $requestOptions['offset-id'] ) && $requestOptions['offset-id'] ) {
+		// @todo Once we migrate View.php to use the API directly
+		// all defaults will be handled by API and not here.
+		$requestOptions += array(
+			'include-offset' => false,
+			'offset-id' => false,
+			'offset-dir' => 'fwd',
+			'offset' => false,
+			'api' => true,
+			'sortby' => 'user',
+			'savesortby' => false,
+		);
+
+		$user = $this->context->getUser();
+		if ( strlen( $requestOptions['sortby'] ) === 0 ) {
+			$requestOptions['sortby'] = 'user';
+		}
+		// the sortby option in $findOptions is not directly used for querying,
+		// but is needed by the pager to generate appropriate pagination links.
+		if ( $requestOptions['sortby'] === 'user' ) {
+			$requestOptions['sortby'] = $user->getOption( 'flow-topiclist-sortby' );
+		}
+		switch( $requestOptions['sortby'] ) {
+		case 'updated':
+			$findOptions = array(
+				'sortby' => 'updated',
+				'sort' => 'workflow_last_update_timestamp',
+				'order' => 'desc',
+			) + $findOptions;
+
+			if ( $requestOptions['offset-id'] ) {
+				throw new FlowException( 'The `updated` sort order does not allow the `offset-id` parameter. Please use `offset`.' );
+			}
+			break;
+
+		case 'newest':
+		default:
+			$findOptions = array(
+				'sortby' => 'newest',
+				'sort' => 'topic_id',
+				'order' => 'desc',
+			) + $findOptions;
+
+			if ( $requestOptions['offset'] ) {
+				throw new FlowException( 'The `newest` sort order does not allow the `offset` parameter.  Please use `offset-id`.' );
+			}
+		}
+
+		if ( $requestOptions['offset-id'] ) {
 			$findOptions['pager-offset'] = UUID::create( $requestOptions['offset-id'] );
-		} elseif ( isset( $requestOptions['offset'] ) && $requestOptions['offset'] ) {
+		} elseif ( $requestOptions['offset'] ) {
 			$findOptions['pager-offset'] = intval( $requestOptions['offset'] );
 		}
 
-		if ( isset( $requestOptions['offset-dir'] ) && $requestOptions['offset-dir'] ) {
+		if ( $requestOptions['offset-dir'] ) {
 			$findOptions['pager-dir'] = $requestOptions['offset-dir'];
 		}
 
-		if ( isset( $requestOptions['api'] ) && $requestOptions['api'] ) {
+		if ( $requestOptions['include-offset'] ) {
+			$findOptions['pager-include-offset'] = $requestOptions['include-offset'];
+		}
+
+		if ( $requestOptions['api'] ) {
 			$findOptions['offset-elastic'] = false;
 		}
 
 		$findOptions['pager-limit'] = $limit;
 
-		// Only support sortby = updated now, fall back to creation time by default otherwise.
-		// To clear the sortby user preference, pass sortby with an empty value
-		$sortByOption = '';
-		$user = $this->context->getUser();
-		if ( isset( $requestOptions['sortby'] ) ) {
-			if ( $requestOptions['sortby'] === 'updated' ) {
-				$sortByOption = 'updated';
-			}
-			if (
-				isset( $requestOptions['savesortby'] )
-				&& !$user->isAnon()
-				&& $user->getOption( 'flow-topiclist-sortby' ) != $sortByOption
-			) {
-				$user->setOption( 'flow-topiclist-sortby', $sortByOption );
-				$user->saveSettings();
-			}
-		} else {
-			if ( !$user->isAnon() && $user->getOption( 'flow-topiclist-sortby' ) === 'updated' ) {
-				 $sortByOption = 'updated';
-			}
-		}
-
-		if ( $sortByOption === 'updated' ) {
-			$findOptions = array(
-				'sort' => 'workflow_last_update_timestamp',
-				'order' => 'desc',
-				// keep sortby so it can be used later for building links
-				'sortby' => 'updated',
-			) + $findOptions;
+		if (
+			$requestOptions['savesortby']
+			&& !$user->isAnon()
+			&& $user->getOption( 'flow-topiclist-sortby' ) != $findOptions['sortby']
+		) {
+			$user->setOption( 'flow-topiclist-sortby', $findOptions['sortby'] );
+			$user->saveSettings();
 		}
 
 		return $findOptions;
@@ -269,6 +329,9 @@ class TopicListBlock extends AbstractBlock {
 	/**
 	 * Gets a set of workflow IDs
 	 * This filters result to only include unmoderated and locked topics.
+	 *
+	 * Also populates topicRootRevisionCache with a mapping from topic ID to the
+	 * PostRevision for the topic root.
 	 *
 	 * @param array $findOptions
 	 * @return PagerPage
@@ -281,7 +344,11 @@ class TopicListBlock extends AbstractBlock {
 		);
 
 		$postStorage = $this->storage->getStorage( 'PostRevision' );
-		return $pager->getPage( function( array $found ) use ( $postStorage ) {
+
+		// Work around lack of $this in closures until we can use PHP 5.4+ features.
+		$topicRootRevisionCache =& $this->topicRootRevisionCache;
+
+		return $pager->getPage( function( array $found ) use ( $postStorage, &$topicRootRevisionCache ) {
 			$queries = array();
 			/** @var TopicListEntry[] $found */
 			foreach ( $found as $entry ) {
@@ -296,11 +363,13 @@ class TopicListBlock extends AbstractBlock {
 			foreach ( $posts as $queryResult ) {
 				$post = reset( $queryResult );
 				if ( !$post->isModerated() || $post->isLocked() ) {
-					$allowed[$post->getPostId()->getAlphadecimal()] = true;
+					$allowed[$post->getPostId()->getAlphadecimal()] = $post;
 				}
 			}
 			foreach ( $found as $idx => $entry ) {
-				if ( !isset( $allowed[$entry->getId()->getAlphadecimal()] ) ) {
+				if ( isset( $allowed[$entry->getId()->getAlphadecimal()] ) ) {
+					$topicRootRevisionCache[$entry->getId()->getAlphadecimal()] = $allowed[$entry->getId()->getAlphadecimal()];
+				} else {
 					unset( $found[$idx] );
 				}
 			}

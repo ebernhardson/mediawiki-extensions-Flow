@@ -194,7 +194,7 @@ class TopicSummaryBlock extends AbstractBlock {
 		$this->storage->put( $this->nextRevision, array(
 			'workflow' => $this->workflow,
 		) );
-		// Reload the $this->formatterRow for renderAPI() after save
+		// Reload the $this->formatterRow for renderApi() after save
 		$this->formatterRow = new FormatterRow();
 		$this->formatterRow->revision = $this->nextRevision;
 		$this->formatterRow->previousRevision = $this->topicSummary;
@@ -203,7 +203,7 @@ class TopicSummaryBlock extends AbstractBlock {
 		$this->topicSummary = $this->nextRevision;
 
 		return array(
-			'new-revision-id' => $this->nextRevision->getRevisionId(),
+			'summary-revision-id' => $this->nextRevision->getRevisionId(),
 		);
 	}
 
@@ -230,7 +230,7 @@ class TopicSummaryBlock extends AbstractBlock {
 	 * @return array
 	 * @throws InvalidInputException
 	 */
-	public function renderAPI( array $options ) {
+	public function renderApi( array $options ) {
 		$output = array( 'type' => $this->getName() );
 
 		if ( $this->wasSubmitted() ) {

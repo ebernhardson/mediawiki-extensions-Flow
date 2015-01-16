@@ -8,8 +8,9 @@
 	/**
 	 * Inherited base class. Stores the instance in the class's instance registry.
 	 * @param {jQuery} $container
-	 * @extends FlowComponentEventsMixin
-	 * @extends FlowComponentEnginesMixin
+	 * @mixins FlowComponentEventsMixin
+	 * @mixins FlowComponentEnginesMixin
+	 * @mixins FlowComponentMenusFeatureMixin
 	 * @constructor
 	 */
 	function FlowComponent( $container ) {
@@ -34,7 +35,7 @@
 		}
 
 		// Give this board its own API instance @todo do this with OOjs
-		this.API = new mw.flow.FlowAPI( FlowComponent.static.StorageEngine, this.id );
+		this.Api = new mw.flow.FlowApi( FlowComponent.static.StorageEngine, this.id );
 
 		// Keep this in the registry to find it by other means
 		while ( parent ) {
@@ -79,6 +80,19 @@
 			// Otherwise, use console.log
 			console.log.apply( console, args );
 		}
+	};
+
+	/**
+	 * Converts a Flow UUID to a UNIX timestamp.
+	 * @param {String} uuid
+	 * @return {int} UNIX time
+	 */
+	mw.flow.uuidToTime = FlowComponent.prototype.uuidToTime = function ( uuid ) {
+		var timestamp = parseInt( uuid, 36 ).toString( 2 ); // Parse from base-36, then serialize to base-2
+		timestamp = Array( 88 + 1 - timestamp.length ).join( '0' ) + timestamp; // left pad 0 to 88 chars
+		timestamp = parseInt( timestamp.substr( 0, 46 ), 2 ); // first 46 chars base-2 to base-10
+
+		return timestamp;
 	};
 
 	/**
@@ -139,7 +153,7 @@
 
 		// Forward all events (except mouse movement) to $eventTarget
 		$el.on(
-			'blur change click dblclick error focus focusin focusout hover keydown keypress keyup load mousedown mouseup resize scroll select submit',
+			'blur change click dblclick error focus focusin focusout keydown keypress keyup load mousedown mouseenter mouseleave mouseup resize scroll select submit',
 			'*',
 			{ flowSpawnedBy: this.$container, flowSpawnedFrom: $el },
 			function ( event ) {
@@ -186,7 +200,7 @@
 		var i, ret, handleObj, matched, j,
 			handlerQueue = [],
 			args = Array.prototype.slice.call( arguments, 0 ),
-			handlers = ( jQuery._data( this, "events" ) || {} )[ event.type ] || [],
+			handlers = ( jQuery._data( this, 'events' ) || {} )[ event.type ] || [],
 			special = jQuery.event.special[ event.type ] || {};
 
 		// Use the fix-ed jQuery.Event rather than the (read-only) native event

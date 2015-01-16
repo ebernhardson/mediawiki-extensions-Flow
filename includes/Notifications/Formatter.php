@@ -6,6 +6,7 @@ use Flow\Exception\FlowException;
 use Flow\Model\Anchor;
 use Flow\Model\UUID;
 use Flow\Parsoid\Utils;
+use Flow\Model\Workflow;
 use EchoBasicFormatter;
 use EchoEvent;
 use Message;
@@ -39,7 +40,24 @@ class NotificationFormatter extends EchoBasicFormatter {
 				$message->params( '' );
 			}
 		} elseif ( $param === 'topic-permalink' ) {
-			$anchor = $this->getUrlGenerator()->workflowLink( $event->getTitle(), $extra['topic-workflow'] );
+			// link to individual new-topic
+
+			if ( isset( $extra['topic-workflow'] ) ) {
+				$title = Workflow::getFromTitleCache(
+					wfWikiId(),
+					NS_TOPIC,
+					$extra['topic-workflow']->getAlphadecimal()
+				);
+			} else {
+				$title = $event->getTitle();
+			}
+
+			$anchor = $this->getUrlGenerator()->workflowLink( $title, $extra['topic-workflow'] );
+			$anchor->query['fromnotif'] = 1;
+			$message->params( $anchor->getFullUrl() );
+		} elseif ( $param === 'new-topics-permalink' ) {
+			// link to board sorted by newest topics
+			$anchor = $this->getUrlGenerator()->boardLink( $event->getTitle(), 'newest' );
 			$anchor->query['fromnotif'] = 1;
 			$message->params( $anchor->getFullUrl() );
 		} elseif ( $param == 'flow-title' ) {

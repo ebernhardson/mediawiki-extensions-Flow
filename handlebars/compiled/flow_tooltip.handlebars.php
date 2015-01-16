@@ -1,23 +1,28 @@
 <?php return function ($in, $debugopt = 1) {
-    $cx = Array(
-        'flags' => Array(
+    $cx = array(
+        'flags' => array(
             'jstrue' => false,
             'jsobj' => false,
             'spvar' => true,
             'prop' => false,
             'method' => false,
             'mustlok' => false,
+            'mustsec' => false,
+            'echo' => false,
             'debug' => $debugopt,
         ),
-        'helpers' => Array(            'html' => 'Flow\TemplateHelper::htmlHelper',
+        'constants' => array(),
+        'helpers' => array(            'html' => 'Flow\TemplateHelper::htmlHelper',
 ),
-        'blockhelpers' => Array(),
-        'hbhelpers' => Array(),
-        'scopes' => Array($in),
-        'sp_vars' => Array(),
+        'blockhelpers' => array(),
+        'hbhelpers' => array(),
+        'partials' => array(),
+        'scopes' => array($in),
+        'sp_vars' => array('root' => $in),
 
     );
-    return '<div class="'.htmlentities(((is_array($in) && isset($in['extraClass'])) ? $in['extraClass'] : null), ENT_QUOTES, 'UTF-8').' flow-ui-tooltip '.htmlentities(((is_array($in) && isset($in['contextClass'])) ? $in['contextClass'] : null), ENT_QUOTES, 'UTF-8').' '.htmlentities(((is_array($in) && isset($in['positionClass'])) ? $in['positionClass'] : null), ENT_QUOTES, 'UTF-8').' '.htmlentities(((is_array($in) && isset($in['blockClass'])) ? $in['blockClass'] : null), ENT_QUOTES, 'UTF-8').' plainlinks">'.LCRun3::ch($cx, 'html', Array(Array(((is_array($in) && isset($in['content'])) ? $in['content'] : null)),Array()), 'encq').'<span class="flow-ui-tooltip-triangle"></span>
+    
+    return '<div class="'.htmlentities((string)((isset($in['extraClass']) && is_array($in)) ? $in['extraClass'] : null), ENT_QUOTES, 'UTF-8').' flow-ui-tooltip '.htmlentities((string)((isset($in['contextClass']) && is_array($in)) ? $in['contextClass'] : null), ENT_QUOTES, 'UTF-8').' '.htmlentities((string)((isset($in['positionClass']) && is_array($in)) ? $in['positionClass'] : null), ENT_QUOTES, 'UTF-8').' '.htmlentities((string)((isset($in['blockClass']) && is_array($in)) ? $in['blockClass'] : null), ENT_QUOTES, 'UTF-8').' plainlinks">'.LCRun3::ch($cx, 'html', array(array(((isset($in['content']) && is_array($in)) ? $in['content'] : null)),array()), 'encq').'<span class="flow-ui-tooltip-triangle"></span>
 </div>
 ';
 }

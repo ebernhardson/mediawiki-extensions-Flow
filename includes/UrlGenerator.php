@@ -188,7 +188,11 @@ class UrlGenerator {
 		return new Anchor(
 			wfMessage( 'flow-link-post' ),
 			$this->resolveTitle( $title, $workflowId ),
-			array(),
+			array(
+				// If the post is moderated this will flag the backend to still
+				// include the content in the html response.
+				'topic_showPostId' => $postId->getAlphadecimal()
+			),
 			'#flow-post-' . $postId->getAlphadecimal()
 		);
 	}
@@ -401,7 +405,7 @@ class UrlGenerator {
 		if ( $sortBy !== null ) {
 			$options['topiclist_sortby'] = $sortBy;
 			if ( $saveSortBy ) {
-				$options['topiclist_savesortby'] = '';
+				$options['topiclist_savesortby'] = '1';
 			}
 		}
 
@@ -427,6 +431,10 @@ class UrlGenerator {
 		UUID $postId,
 		$isTopLevelReply
 	) {
+		$hash = "#flow-post-{$postId->getAlphadecimal()}";
+		if ( $isTopLevelReply ) {
+			$hash .= "-form-content";
+		}
 		return new Anchor(
 			wfMessage( 'flow-reply-link' ),
 			$this->resolveTitle( $title, $workflowId ),
@@ -434,7 +442,7 @@ class UrlGenerator {
 				'action' => 'reply',
 				'topic_postId' => $postId->getAlphadecimal(),
 			),
-			( $isTopLevelReply ? '#flow-reply-' : '#flow-post-' ) . $postId->getAlphadecimal()
+			$hash
 		);
 	}
 

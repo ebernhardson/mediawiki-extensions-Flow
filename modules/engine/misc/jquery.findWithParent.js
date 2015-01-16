@@ -1,4 +1,4 @@
-( function ( $, undefined ) {
+( function ( $ ) {
 	/**
 	 * Gives support to find parent elements using .closest with less-than selector syntax.
 	 * @example $.findWithParent( $div, "< html div < body" ); // find closest parent of $div "html", find child "div" of it, find closest parent "body" of that, return "body"
@@ -32,6 +32,14 @@
 
 	$.findWithParent = jQueryFindWithParent;
 	$.fn.findWithParent = function ( selector ) {
-		return jQueryFindWithParent( this, selector );
+		var selectors = selector.split( ',' ),
+			$elements = $(),
+			self = this;
+
+		$.each( selectors, function( i, selector ) {
+			$elements = $elements.add( jQueryFindWithParent( self, selector ) );
+		} );
+
+		return $elements;
 	};
 }( jQuery ) );

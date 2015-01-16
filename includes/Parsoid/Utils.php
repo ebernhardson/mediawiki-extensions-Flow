@@ -4,11 +4,17 @@ namespace Flow\Parsoid;
 
 use DOMDocument;
 use DOMNode;
+use FauxResponse;
+use Flow\Container;
+use Flow\Exception\FlowException;
+use Flow\Exception\InvalidDataException;
+use Flow\Exception\NoParsoidException;
+use Flow\Exception\WikitextException;
 use Language;
 use OutputPage;
+use RequestContext;
 use Title;
-use Flow\Exception\WikitextException;
-use Flow\Exception\InvalidDataException;
+use User;
 
 abstract class Utils {
 	/**
@@ -30,13 +36,13 @@ abstract class Utils {
 		$section = new \ProfileSection( __METHOD__ );
 
 		try {
-			// use VE API (which connects to Parsoid) if available...
-			$res = self::parsoid( $from, $to, $content, $title );
+			self::parsoidConfig();
 		} catch ( NoParsoidException $e ) {
-			// ... otherwise default to parser
-			$res = self::parser( $from, $to, $content, $title );
+			// If we have no parsoid config, fallback to the parser.
+			return self::parser( $from, $to, $content, $title );
 		}
-		return $res;
+
+		return self::parsoid( $from, $to, $content, $title );
 	}
 
 	/**
@@ -76,10 +82,7 @@ abstract class Utils {
 	 * @throws WikitextException When conversion is unsupported
 	 */
 	protected static function parsoid( $from, $to, $content, Title $title ) {
-		list( $parsoidURL, $parsoidPrefix, $parsoidTimeout ) = self::parsoidConfig();
-		if ( !isset( $parsoidURL ) || !$parsoidURL ) {
-			throw new NoParsoidException( 'Flow Parsoid configuration is unavailable' );
-		}
+		list( $parsoidURL, $parsoidPrefix, $parsoidTimeout, $parsoidForwardCookies ) = self::parsoidConfig();
 
 		if ( $from == 'html' ) {
 			$from = 'html';
@@ -99,10 +102,19 @@ abstract class Utils {
 				'connectTimeout' => 'default',
 			)
 		);
+		if ( $parsoidForwardCookies && !User::isEveryoneAllowed( 'read' ) ) {
+			if ( PHP_SAPI === 'cli' ) {
+				// From the command line we need to generate a cookie
+				$cookies = self::generateForwardedCookieForCli();
+			} else {
+				$cookies = RequestContext::getMain()->getRequest()->getHeader( 'Cookie' );
+			}
+			$request->setHeader( 'Cookie', $cookies );
+		}
 		$status = $request->execute();
 		if ( !$status->isOK() ) {
 			wfDebugLog( 'Flow', __METHOD__ . ': Failed contacting parsoid: ' . $status->getMessage()->text() );
-			throw new WikitextException( 'Failed contacting Parsoid', 'process-wikitext' );
+			throw new NoParsoidException( 'Failed contacting Parsoid', 'process-wikitext' );
 		}
 		$response = $request->getContent();
 
@@ -164,17 +176,26 @@ abstract class Utils {
 	 * specify a certain Parsoid installation. If none specified, we'll piggy-
 	 * back on VisualEditor's Parsoid setup.
 	 *
-	 * @return array Parsoid config, in array(URL, prefix, timeout) format
+	 * @return array Parsoid config, in array(URL, prefix, timeout, forwardCookies) format
+	 * @throws NoParsoidException When parsoid is unconfigured
 	 */
 	protected static function parsoidConfig() {
 		global
-			$wgFlowParsoidURL, $wgFlowParsoidPrefix, $wgFlowParsoidTimeout,
-			$wgVisualEditorParsoidURL, $wgVisualEditorParsoidPrefix, $wgVisualEditorParsoidTimeout;
+			$wgFlowParsoidURL, $wgFlowParsoidPrefix, $wgFlowParsoidTimeout, $wgFlowParsoidForwardCookies,
+			$wgVisualEditorParsoidURL, $wgVisualEditorParsoidPrefix, $wgVisualEditorParsoidTimeout,
+			$wgVisualEditorParsoidForwardCookies;
+
+		if ( !$wgFlowParsoidURL && !$wgVisualEditorParsoidURL ) {
+			throw new NoParsoidException( 'Flow Parsoid configuration is unavailable', 'process-wikitext' );
+		}
 
 		return array(
-			$wgFlowParsoidURL ? $wgFlowParsoidURL : $wgVisualEditorParsoidURL,
-			$wgFlowParsoidPrefix ? $wgFlowParsoidPrefix : $wgVisualEditorParsoidPrefix,
-			$wgFlowParsoidTimeout ? $wgFlowParsoidTimeout : $wgVisualEditorParsoidTimeout,
+			$wgFlowParsoidURL ?: $wgVisualEditorParsoidURL,
+			$wgFlowParsoidPrefix ?: $wgVisualEditorParsoidPrefix,
+			$wgFlowParsoidTimeout ?: $wgVisualEditorParsoidTimeout,
+			isset( $wgFlowParsoidForwardCookies )
+				? $wgFlowParsoidForwardCookies
+				: $wgVisualEditorParsoidForwardCookies,
 		);
 	}
 
@@ -223,7 +244,8 @@ abstract class Utils {
 
 		if ( $errors ) {
 			throw new WikitextException(
-				implode( "\n", array_map( function( $error ) { return $error->message; }, $errors ) ),
+				implode( "\n", array_map( function( $error ) { return $error->message; }, $errors ) )
+				. "\n\nFrom source content:\n" . $content,
 				'process-wikitext'
 			);
 		}
@@ -240,12 +262,15 @@ abstract class Utils {
 	 */
 	public static function onFlowAddModules( OutputPage $out ) {
 
-		list( $parsoidURL ) = self::parsoidConfig();
-		if ( isset( $parsoidURL ) && $parsoidURL ) {
+		try {
+			self::parsoidConfig();
 			// XXX We only need the Parsoid CSS if some content being
 			// rendered has getContentFormat() === 'html'.
 			$out->addModules( 'mediawiki.skinning.content.parsoid' );
+		} catch ( NoParsoidException $e ) {
+			// The module is only necessary when we are using parsoid.
 		}
+
 		return true;
 	}
 
@@ -287,6 +312,31 @@ abstract class Utils {
 
 		return Title::newFromText( $text );
 	}
-}
 
-class NoParsoidException extends \MWException {}
+	// @todo move into FauxRequest
+	public static function generateForwardedCookieForCli() {
+		global $wgCookiePrefix;
+
+		$user = Container::get( 'occupation_controller' )->getTalkpageManager();
+		// This takes a request object, but doesnt set the cookies against it.
+		// patch at https://gerrit.wikimedia.org/r/177403
+		$user->setCookies( null, null, /* rememberMe */ true );
+		$response = RequestContext::getMain()->getRequest()->response();
+		if ( !$response instanceof FauxResponse ) {
+			throw new FlowException( 'Expected a FauxResponse in CLI environment' );
+		}
+		// FauxResponse does not yet expose the full set of cookies
+		$reflProp = new \ReflectionProperty( $response, 'cookies' );
+		$reflProp->setAccessible( true );
+		$cookies = $reflProp->getValue( $response );
+
+		// now we need to convert the array into the cookie format of
+		// foo=bar; baz=bang
+		$output = array();
+		foreach ( $cookies as $key => $value ) {
+			$output[] = "$wgCookiePrefix$key=$value";
+		}
+
+		return implode( '; ', $output );
+	}
+}

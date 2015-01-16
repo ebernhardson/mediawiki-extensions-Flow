@@ -10,8 +10,17 @@
 	 * @constructor
 	 */
 	function FlowBoardAndHistoryComponentBase( $container ) {
+		this.bindNodeHandlers( FlowBoardAndHistoryComponentBase.UI.events );
 	}
 	OO.initClass( FlowBoardAndHistoryComponentBase );
+
+	FlowBoardAndHistoryComponentBase.UI = {
+		events: {
+			apiPreHandlers: {},
+			apiHandlers: {},
+			interactiveHandlers: {}
+		}
+	};
 
 	// Register
 	mw.flow.registerComponent( 'boardAndHistoryBase', FlowBoardAndHistoryComponentBase );
@@ -34,39 +43,132 @@
 		// Progressively enhance the board and its forms
 		// @todo Needs a ~"liveUpdateComponents" method, since the functionality in makeContentInteractive needs to also run when we receive new content or update old content.
 		// @todo move form stuff
-		this.emitWithReturn( 'makeContentInteractive', this );
-
-		// Bind any necessary event handlers to this board
-		this.bindContainerHandlers( this );
-
-		// Initialize editors, turning them from textareas into editor objects
-		if ( typeof this.editorTimer === 'undefined' ) {
-			/*
-			 * When this method is first run, all page elements are initialized.
-			 * We probably don't need editor immediately, so defer loading it
-			 * to speed up the rest of the work that needs to be done.
-			 */
-			this.editorTimer = setTimeout( $.proxy( function ( $container ) { this.emitWithReturn( 'initializeEditors', $container ); }, this, $container ), 20000 );
-		} else {
-			/*
-			 * Subsequent calls here (e.g. when rendering the edit header form)
-			 * should immediately initialize the editors!
-			 */
-			clearTimeout( this.editorTimer );
-			this.emitWithReturn( 'initializeEditors', $container );
+		if ( $container.data( 'flow-component' ) !== 'board' ) {
+			// Don't do this for FlowBoardComponent, because that runs makeContentInteractive in its own reinit
+			this.emitWithReturn( 'makeContentInteractive', this );
 		}
 
 		// We don't replace anything with this method (we do with flowBoardComponentReinitializeContainer)
 		return $();
 	};
 
+	//
+	// Interactive handlers
+	//
+
 	/**
-	 * Binds event handlers to individual boards
-	 * @param {FlowBoardAndHistoryComponentBase} flowBoard
+	 * @param {Event} event
+	 * @returns {$.Promise}
 	 */
-	FlowBoardAndHistoryComponentBase.prototype.bindContainerHandlers = function ( flowBoard ) {
-		// Load the collapser state from localStorage
-		this.collapserState( flowBoard );
+	FlowBoardAndHistoryComponentBase.UI.events.interactiveHandlers.moderationDialog = function ( event ) {
+		var $form,
+			$this = $( this ),
+			flowComponent = mw.flow.getPrototypeMethod( 'boardAndHistoryBase', 'getInstanceByElement' )( $this ),
+			// hide, delete, suppress
+			// @todo this could just be detected from the url
+			role = $this.data( 'role' ),
+			template = $this.data( 'flow-template' ),
+			params = {
+				editToken: mw.user.tokens.get( 'editToken' ), // might be unnecessary
+				submitted: {
+					moderationState: role
+				},
+				actions: {}
+			},
+			$deferred = $.Deferred(),
+			modal;
+
+		event.preventDefault();
+
+		params.actions[role] = { url: $this.attr( 'href' ), title: $this.attr( 'title' ) };
+
+		// Render the modal itself with mw-ui-modal
+		modal = mw.Modal( {
+			open:  $( mw.flow.TemplateEngine.processTemplateGetFragment( template, params ) ).children(),
+			disableCloseOnOutsideClick: true
+		} );
+
+		// @todo remove this data-flow handler forwarder when data-mwui handlers are implemented
+		// Have the events begin bubbling up from $board
+		flowComponent.assignSpawnedNode( modal.getNode(), flowComponent.$board );
+
+		// Run loadHandlers
+		flowComponent.emitWithReturn( 'makeContentInteractive', modal.getContentNode() );
+
+		// Set flowDialogOwner for API callback @todo find a better way of doing this with mw.Modal
+		$form = modal.getContentNode().find( 'form' ).data( 'flow-dialog-owner', $this );
+		// Bind the cancel callback on the form
+		flowComponent.emitWithReturn( 'addFormCancelCallback', $form, function () {
+			mw.Modal.close( this );
+		} );
+
+		modal = null; // avoid permanent reference
+
+		return $deferred.resolve().promise();
+	};
+
+	/**
+	 * Cancels and closes a form. If text has been entered, issues a warning first.
+	 * @param {Event} event
+	 * @returns {$.Promise}
+	 */
+	FlowBoardAndHistoryComponentBase.UI.events.interactiveHandlers.cancelForm = function ( event ) {
+		var target = this,
+			$form = $( this ).closest( 'form' ),
+			flowComponent = mw.flow.getPrototypeMethod( 'boardAndHistoryBase', 'getInstanceByElement' )( $form ),
+			$fields = $form.find( 'textarea, :text' ),
+			changedFieldCount = 0,
+			$deferred = $.Deferred(),
+			callbacks = $form.data( 'flow-cancel-callback' ) || [],
+			schemaName = $( this ).data( 'flow-eventlog-schema' ),
+			funnelId = $( this ).data( 'flow-eventlog-funnel-id' );
+
+		event.preventDefault();
+
+		// Only log cancel attempt if it was user-initiated, not when the cancel
+		// was triggered by code (as part of a post-submit form destroy)
+		if ( event.which ) {
+			flowComponent.logEvent( schemaName, { action: 'cancel-attempt', funnelId: funnelId } );
+		}
+
+		// Check for non-empty fields of text
+		$fields.each( function () {
+			if ( $( this ).val() !== this.defaultValue ) {
+				changedFieldCount++;
+				return false;
+			}
+		} );
+
+		// Only log if user had already entered text (= confirmation was requested)
+		if ( changedFieldCount ) {
+			if ( confirm( flowComponent.constructor.static.TemplateEngine.l10n( 'flow-cancel-warning' ) ) ) {
+				flowComponent.logEvent( schemaName, { action: 'cancel-success', funnelId: funnelId } );
+			} else {
+				flowComponent.logEvent( schemaName, { action: 'cancel-abort', funnelId: funnelId } );
+
+				// User aborted cancel, quit this function & don't destruct the form!
+				return $deferred.reject().promise();
+			}
+		}
+
+		// Reset the form content
+		$form[0].reset();
+
+		// Trigger for flow-actions-disabler
+		$form.find( 'textarea, :text' ).trigger( 'keyup' );
+
+		// Hide the form
+		flowComponent.emitWithReturn( 'hideForm', $form );
+
+		// Get rid of existing error messages
+		flowComponent.emitWithReturn( 'removeError', $form );
+
+		// Trigger the cancel callback
+		$.each( callbacks, function ( idx, fn ) {
+			fn.call( target, event );
+		} );
+
+		return $deferred.resolve().promise();
 	};
 
 	//

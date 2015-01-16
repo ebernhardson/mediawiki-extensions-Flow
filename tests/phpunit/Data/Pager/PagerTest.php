@@ -2,6 +2,10 @@
 
 namespace Flow\Tests\Data\Pager;
 
+use Flow\Data\BagOStuff;
+use Flow\Data\BagOStuff\LocalBufferedBagOStuff;
+use Flow\Data\BufferedCache;
+use Flow\Data\Index\TopKIndex;
 use Flow\Data\Pager\Pager;
 use stdClass;
 
@@ -12,7 +16,7 @@ class PagerTest extends \MediaWikiTestCase {
 
 	public static function getPageResultsProvider() {
 		$objs = array();
-		foreach ( range( 'A', 'G' ) as $letter ) {
+		foreach ( range( 'A', 'J' ) as $letter ) {
 			$objs[$letter] = (object)array( 'foo' => $letter );
 		}
 
@@ -75,7 +79,31 @@ class PagerTest extends \MediaWikiTestCase {
 					return array_filter( $found, function( $obj ) {
 						return $obj->foo !== 'B' && $obj->foo !== 'C';
 					} );
-				}
+				},
+			),
+
+			array(
+				'Reverse pagination with filter',
+				// expect
+				array( $objs['B'], $objs['F'], $objs['I'] ),
+				// find results
+				array(
+					// note thate feature index will return these in the normal
+					// forward sort order, the provided direction just means to
+					// get items before rather than after the offset.
+					// verified at FeatureIndexTest::testReversePagination()
+					array( $objs['G'], $objs['H'], $objs['I'], $objs['J'] ),
+					array( $objs['C'], $objs['D'], $objs['E'], $objs['F'] ),
+					array( $objs['A'], $objs['B'] ),
+				),
+				// query options
+				array( 'pager-limit' => 3, 'pager-dir' => 'rev', 'pager-offset' => 'K' ),
+				// query filter
+				function( $found ) {
+					return array_filter( $found, function( $obj ) {
+						return in_array( $obj->foo, array( 'I', 'F', 'B', 'A' ) );
+					} );
+				},
 			),
 		);
 	}
@@ -84,7 +112,6 @@ class PagerTest extends \MediaWikiTestCase {
 	 * @dataProvider getPageResultsProvider
 	 */
 	public function testGetPageResults( $message, $expect, $found, array $options, $filter ) {
-
 		$pager = new Pager(
 			$this->mockObjectManager( $found ),
 			array( 'otherthing' => 42 ),
@@ -221,7 +248,6 @@ class PagerTest extends \MediaWikiTestCase {
 				// filter
 				null,
 			),
-
 		);
 	}
 
@@ -334,6 +360,126 @@ class PagerTest extends \MediaWikiTestCase {
 			$this->assertArrayHasKey( $key, $options, $optionsString );
 			$this->assertEquals( $value, $options[$key], $optionsString );
 		}
+	}
+
+	public function includeOffsetProvider() {
+		return array(
+			array(
+				'',
+				// expected returned series of 'bar' values
+				array( 5, 4, 3, 2, 1 ),
+				// query options
+				array(
+					'offset-id' => 5,
+					'include-offset' => true,
+				),
+			),
+			array(
+				'',
+				// expected returned series of 'bar' values
+				array( 4, 3, 2, 1 ),
+				// query options
+				array(
+					'offset-id' => 5,
+					'include-offset' => false,
+				),
+			),
+			array(
+				'',
+				// expected returned series of 'bar' values
+				array( 9, 8, 7, 6, 5 ),
+				// query options
+				array(
+					'offset-id' => 5,
+					'include-offset' => true,
+					'offset-dir' => 'rev',
+					'offset-elastic' => false,
+				),
+			),
+			array(
+				'',
+				// expected returned series of 'bar' values
+				array( 9, 8, 7, 6 ),
+				// query options
+				array(
+					'offset-id' => 5,
+					'include-offset' => false,
+					'offset-dir' => 'rev',
+					'offset-elastic' => false,
+				),
+			),
+			array(
+				'',
+				// expected returned series of 'bar' values
+				array( 9, 8, 7, 6, 5, 4, 3, 2, 1 ),
+				// query options
+				array(
+					'offset-id' => 5,
+					'include-offset' => true,
+					'offset-dir' => 'rev',
+					'offset-elastic' => true,
+				),
+			),
+			array(
+				'',
+				// expected returned series of 'bar' values
+				array( 9, 8, 7, 6, 5, 4, 3, 2, 1 ),
+				// query options
+				array(
+					'offset-id' => 5,
+					'include-offset' => false,
+					'offset-dir' => 'rev',
+					'offset-elastic' => true,
+				),
+			),
+
+		);
+	}
+
+	/**
+	 * @dataProvider includeOffsetProvider
+	 */
+	public function testIncludeOffset( $message, $expect, $queryOptions ) {
+		global $wgFlowCacheVersion;
+
+		$bag = new \HashBagOStuff();
+		$innerCache = new LocalBufferedBagOStuff( $bag );
+		$cache = new BufferedCache( $innerCache );
+
+		// preload our answer
+		$bag->set( wfWikiId() . ":prefix:1:$wgFlowCacheVersion", array(
+			array( 'foo' => 1, 'bar' => 9 ),
+			array( 'foo' => 1, 'bar' => 8 ),
+			array( 'foo' => 1, 'bar' => 7 ),
+			array( 'foo' => 1, 'bar' => 6 ),
+			array( 'foo' => 1, 'bar' => 5 ),
+			array( 'foo' => 1, 'bar' => 4 ),
+			array( 'foo' => 1, 'bar' => 3 ),
+			array( 'foo' => 1, 'bar' => 2 ),
+			array( 'foo' => 1, 'bar' => 1 ),
+		) );
+
+		$storage = $this->getMock( 'Flow\Data\ObjectStorage' );
+
+		$index = new TopKIndex(
+			$cache,
+			$storage,
+			'prefix',
+			array( 'foo' ),
+			array(
+				'sort' => 'bar',
+			)
+		);
+
+		$result = $index->find( array( 'foo' => '1' ), $queryOptions );
+		foreach ( $result as $row ) {
+			$found[] = $row['bar'];
+		}
+
+		$this->assertEquals(
+			$expect,
+			$found
+		);
 	}
 
 	protected function mockObjectManager( array $found = array() ) {

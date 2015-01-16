@@ -10,17 +10,30 @@ $flowResourceTemplate = array(
 	'group' => 'ext.flow',
 );
 
-$flowTemplatingResourceTemplate = $flowResourceTemplate + array(
-	'localTemplateBasePath' => __DIR__ . '/handlebars',
-	'class' => 'ResourceLoaderTemplateModule',
+$flowTemplatingResourceTemplate = array(
+	'localBasePath' => __DIR__ . '/handlebars',
+	'remoteExtPath' => 'Flow/modules',
+	'group' => 'ext.flow',
+	'class' => 'ResourceLoaderFileModule',
 	'targets' => array( 'mobile', 'desktop' ),
 );
 
 $wgResourceModules += array(
+	'ext.flow.contributions' => $flowResourceTemplate + array(
+		'scripts' => array(
+			'contributions/base.js',
+		),
+	),
+	'ext.flow.contributions.styles' => $flowResourceTemplate + array(
+		'styles' => array(
+			'styles/history/history-line.less',
+		),
+	),
 	'ext.flow.templating' => $flowTemplatingResourceTemplate + array(
-		'class' => 'ResourceLoaderTemplateModule',
-		'dependencies' => 'ext.mantle.handlebars',
-		'localTemplateBasePath' => $dir . 'handlebars',
+		'dependencies' => array(
+			'ext.mantle.handlebars',
+			'moment',
+		),
 		'templates' => array(
 			'flow_anon_warning.handlebars',
 			"flow_block_board-history.handlebars",
@@ -39,9 +52,8 @@ $wgResourceModules += array(
 			"flow_block_topicsummary_diff_view.handlebars",
 			"flow_block_topicsummary_edit.handlebars",
 			"flow_block_topicsummary_single_view.handlebars",
-			"flow_board_collapsers_subcomponent.handlebars",
 			"flow_board_navigation.handlebars",
-			"flow_component.handlebars",
+			"flow_board_toc_loop.handlebars",
 			"flow_edit_post.handlebars",
 			"flow_edit_post_ajax.handlebars",
 			"flow_edit_topic_title.handlebars",
@@ -50,19 +62,21 @@ $wgResourceModules += array(
 			"flow_moderate_post.handlebars",
 			"flow_moderate_topic.handlebars",
 			"flow_moderate_topic_confirmation.handlebars",
+			"flow_moderation_actions_list.handlebars",
+			"flow_moderate_post_confirmation.handlebars",
 			"flow_newtopic_form.handlebars",
 			"flow_post.handlebars",
 			"flow_post_inner.handlebars",
 			"flow_post_author.handlebars",
 			"flow_post_actions.handlebars",
 			"flow_post_meta_actions.handlebars",
+			"flow_post_moderation_state.handlebars",
 			"flow_post_replies.handlebars",
 			"flow_reply_form.handlebars",
 			// Include dependent templates from handlebars/Makefile.
 			"flow_block_loop.handlebars",
 			"form_element.handlebars",
 			"flow_load_more.handlebars",
-			"flow_no_more.handlebars",
 			"flow_tooltip.handlebars",
 			"flow_tooltip_subscribed.handlebars",
 			"flow_subscribed.handlebars",
@@ -100,12 +114,14 @@ $wgResourceModules += array(
 			'flow-post-action-suppress-post',
 			'flow-post-action-unsuppress-post',
 			'flow-post-action-restore-post',
+			'flow-post-action-undo-moderation',
 			"flow-preview-return-edit-post",
 			'flow-preview',
 			'flow-recent-topics',
 			'flow-reply-submit',
 			'flow-reply-topic-title-placeholder',
-			'flow-sorting-tooltip',
+			'flow-sorting-tooltip-newest',
+			'flow-sorting-tooltip-recent',
 			'flow-summarize-topic-submit',
 			'flow-unlock-topic-submit',
 			'flow-lock-topic-submit',
@@ -184,24 +200,28 @@ $wgResourceModules += array(
 			'flow-moderation-placeholder-unhide-post',
 			'flow-moderation-placeholder-undelete-post',
 			'flow-moderation-placeholder-unsuppress-post',
+			'flow-moderation-placeholder-unlock-topic',
 			'flow-moderation-placeholder-unhide-topic',
 			'flow-moderation-placeholder-undelete-topic',
 			'flow-moderation-placeholder-unsuppress-topic',
 			'flow-moderation-placeholder-hide-post',
 			'flow-moderation-placeholder-delete-post',
 			'flow-moderation-placeholder-suppress-post',
+			'flow-moderation-placeholder-lock-topic',
 			'flow-moderation-placeholder-hide-topic',
 			'flow-moderation-placeholder-delete-topic',
 			'flow-moderation-placeholder-suppress-topic',
 			'flow-moderation-confirm-unhide-post',
 			'flow-moderation-confirm-undelete-post',
 			'flow-moderation-confirm-unsuppress-post',
+			'flow-moderation-confirm-unlock-topic',
 			'flow-moderation-confirm-unhide-topic',
 			'flow-moderation-confirm-undelete-topic',
 			'flow-moderation-confirm-unsuppress-topic',
 			'flow-moderation-confirm-hide-post',
 			'flow-moderation-confirm-delete-post',
 			'flow-moderation-confirm-suppress-post',
+			'flow-moderation-confirm-lock-topic',
 			'flow-moderation-confirm-hide-topic',
 			'flow-moderation-confirm-delete-topic',
 			'flow-moderation-confirm-suppress-topic',
@@ -209,6 +229,15 @@ $wgResourceModules += array(
 			'flow-moderation-confirmation-delete-topic',
 			'flow-moderation-confirmation-suppress-topic',
 			'flow-topic-moderated-reason-prefix',
+			// Undo actions
+			'flow-post-undo-hide',
+			'flow-post-undo-delete',
+			'flow-post-undo-suppress',
+			// Timestamps
+			'flow-edited',
+			'flow-edited-by',
+			// Board header
+			"flow-board-header-browse-topics-link",
 		),
 	),
 	// @todo: upstream to mediawiki ui
@@ -245,11 +274,11 @@ $wgResourceModules += array(
 		'styles' => array(
 			'styles/common.less',
 			'styles/errors.less',
+			'styles/history/history-line.less',
 		),
 	) + $mobile,
 	'ext.flow.board.styles' => $flowResourceTemplate + array(
 		'styles' => array(
-			'styles/board/collapser.less',
 			'styles/board/header.less',
 			'styles/board/menu.less',
 			'styles/board/navigation.less',
@@ -264,8 +293,6 @@ $wgResourceModules += array(
 	) + $mobile,
 	'ext.flow.board.topic.styles' => $flowResourceTemplate + array(
 		'styles' => array(
-			'styles/board/topic/navigation.less',
-			'styles/board/topic/navigator.less',
 			'styles/board/topic/titlebar.less',
 			'styles/board/topic/meta.less',
 			'styles/board/topic/post.less',
@@ -277,32 +304,11 @@ $wgResourceModules += array(
 		'scripts' => array(
 			'engine/misc/flow-handlebars.js',
 		),
-		'messages' => array(
-			'flow-time-ago-second',
-			'flow-time-ago-minute',
-			'flow-time-ago-hour',
-			'flow-time-ago-day',
-			'flow-time-ago-week',
-			'flow-active-ago-second',
-			'flow-active-ago-minute',
-			'flow-active-ago-hour',
-			'flow-active-ago-day',
-			'flow-active-ago-week',
-			'flow-started-ago-second',
-			'flow-started-ago-minute',
-			'flow-started-ago-hour',
-			'flow-started-ago-day',
-			'flow-started-ago-week',
-			'flow-edited-ago-second',
-			'flow-edited-ago-minute',
-			'flow-edited-ago-hour',
-			'flow-edited-ago-day',
-			'flow-edited-ago-week',
-		),
 		'dependencies' => array(
 			'ext.mantle.handlebars',
 			// the timestamp helper uses the timestamp template
 			'ext.flow.templating',
+			'moment',
 		),
 	) + $mobile,
 	'ext.flow' => $flowResourceTemplate + array(
@@ -310,25 +316,41 @@ $wgResourceModules += array(
 			// MW UI
 			'engine/misc/mw-ui.enhance.js',
 			'engine/misc/mw-ui.modal.js',
-			// FlowAPI
+
+			// FlowApi
 			'engine/misc/flow-api.js',
+			// FlowEventLog
+			'engine/misc/flow-eventlog.js',
 			// Component registry
 			'engine/components/flow-registry.js',
 			// FlowComponent must come before actual components
 			'engine/components/flow-component.js',
 			'engine/components/common/flow-component-engines.js',
 			'engine/components/common/flow-component-events.js',
+			// Feature: flow-menu
+			'engine/components/common/flow-component-menus.js',
+
+			// Component: BoardAndHistoryBase
 			// Base class for both FlowBoardComponent and FlowBoardHistoryComponent
 			// Implements common methods between them, such as topic namespace checking
 			'engine/components/board/base/flow-boardandhistory-base.js',
-			// FlowBoardComponent
+
+			// Component: FlowBoardComponent
 			'engine/components/board/flow-board.js',
 			'engine/components/board/base/flow-board-api-events.js',
 			'engine/components/board/base/flow-board-interactive-events.js',
 			'engine/components/board/base/flow-board-load-events.js',
 			'engine/components/board/base/flow-board-misc.js',
-			// FlowBoardHistoryComponent
+			// Feature: Load More
+			'engine/components/board/features/flow-board-loadmore.js',
+			// Feature: Board Navigation Header
+			'engine/components/board/features/flow-board-navigation.js',
+			// Feature: Table of Contents
+			'engine/components/board/features/flow-board-toc.js',
+
+			// Component: FlowBoardHistoryComponent
 			'engine/components/board/flow-boardhistory.js',
+
 			// This must be the last file loaded
 			'flow-initialize.js',
 		),
@@ -337,7 +359,7 @@ $wgResourceModules += array(
 			'ext.flow.templating', // ResourceLoader templating
 			'ext.flow.handlebars', // prototype-based for progressiveEnhancement
 			'ext.flow.vendor.storer',
-			'ext.flow.vendor.jquery.ba-throttle-debounce',
+			'jquery.throttle-debounce',
 			'mediawiki.jqueryMsg',
 			'ext.flow.jquery.conditionalScroll',
 			'ext.flow.jquery.findWithParent',
@@ -358,11 +380,6 @@ $wgResourceModules += array(
 	'ext.flow.vendor.storer' => $flowResourceTemplate + array(
 		'scripts' => array(
 			'vendor/Storer.js',
-		),
-	) + $mobile,
-	'ext.flow.vendor.jquery.ba-throttle-debounce' => $flowResourceTemplate + array(
-		'scripts' => array(
-			'vendor/jquery.ba-throttle-debounce.js',
 		),
 	) + $mobile,
 	'ext.flow.editor' => $flowResourceTemplate + array(
@@ -395,3 +412,22 @@ $wgResourceModules += array(
 		),
 	) + $mobile,
 );
+
+$wgHooks['ResourceLoaderRegisterModules'][] = function ( ResourceLoader &$resourceLoader ) {
+	global $wgFlowEventLogging, $wgResourceModules;
+
+	// Only if EventLogging in Flow is enabled & EventLogging exists
+	if ( $wgFlowEventLogging && class_exists( 'ResourceLoaderSchemaModule' ) ) {
+		$resourceLoader->register( 'schema.FlowReplies', array(
+			'class' => 'ResourceLoaderSchemaModule',
+			'schema' => 'FlowReplies',
+			// See https://meta.wikimedia.org/wiki/Schema:FlowReplies, below title
+			'revision' => 10561344,
+		) );
+
+		// Add as dependency to Flow JS
+		$wgResourceModules['ext.flow']['dependencies'][] = 'schema.FlowReplies';
+	}
+
+	return true;
+};

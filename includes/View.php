@@ -5,6 +5,7 @@ namespace Flow;
 use Flow\Block\AbstractBlock;
 use Flow\Exception\InvalidActionException;
 use Flow\Model\Anchor;
+use Flow\Model\UUID;
 use Flow\Model\Workflow;
 use ContextSource;
 use Html;
@@ -69,13 +70,6 @@ class View extends ContextSource {
 		$workflow = $loader->getWorkflow();
 
 		$title = $workflow->getArticleTitle();
-		// Temporary hack to make relative links work when the page is requested as /w/index.php?title=
-		// @todo this wont work when we eventually display posts from multiple source pages,
-		// @todo Patch core to either deprecate /w/index.php?title= and issue redirects, or
-		//   include the <base href="..."> directly from core
-		$out->prependHTML( Html::element( 'base', array(
-			'href' => $title->getLinkURL()
-		) ) );
 
 		$request = $this->getRequest();
 		$user = $this->getUser();
@@ -131,7 +125,7 @@ class View extends ContextSource {
 		$editToken = $user->getEditToken();
 		foreach ( $blocks as $block ) {
 			if ( $wasPosted ? $block->canSubmit( $action ) : $block->canRender( $action ) ) {
-				$apiResponse['blocks'][] = $block->renderAPI( $parameters[$block->getName()] )
+				$apiResponse['blocks'][] = $block->renderApi( $parameters[$block->getName()] )
 								+ array(
 									'title' => $apiResponse['title'],
 									'block-action-template' => $block->getTemplate( $action ),
@@ -152,9 +146,19 @@ class View extends ContextSource {
 
 		array_walk_recursive( $apiResponse, function( &$value ) {
 			if ( $value instanceof Anchor ) {
+				$anchor = $value;
 				$value = $value->toArray();
+
+				// TODO: We're looking into another approach for this
+				// using a parser function, so the URL doesn't have to be
+				// fully qualified.
+				// See https://bugzilla.wikimedia.org/show_bug.cgi?id=66746
+				$value['url'] = $anchor->getFullURL();
+
 			} elseif ( $value instanceof Message ) {
 				$value = $value->text();
+			} elseif ( $value instanceof UUID ) {
+				$value = $value->getAlphadecimal();
 			}
 		} );
 		wfProfileOut( __CLASS__ . '-serialize' );
@@ -182,7 +186,14 @@ class View extends ContextSource {
 			$renderedBlocks = array();
 
 			foreach ( $apiResponse['blocks'] as $block ) {
-				$flowComponent = 'board';
+				// @todo find a better way to do this; potentially make all blocks their own components
+				switch ( $block['type'] ) {
+					case 'board-history':
+						$flowComponent = 'boardHistory';
+						break;
+					default:
+						$flowComponent = 'board';
+				}
 
 				// Don't re-render a block type twice in one page
 				if ( isset( $renderedBlocks[$flowComponent] ) ) {
@@ -190,10 +201,18 @@ class View extends ContextSource {
 				}
 				$renderedBlocks[$flowComponent] = true;
 
-				// Render this template
-				$apiResponse['component'] = $flowComponent;
-				$template = $this->lightncandy->getTemplate( 'flow_component' );
-				$out->addHTML( $template( $apiResponse ) );
+				// Get the block loop template
+				$template = $this->lightncandy->getTemplate( 'flow_block_loop' );
+				// Output the component, with the rendered blocks inside it
+				$out->addHTML( Html::rawElement(
+					'div',
+					array(
+						'class'               => 'flow-component',
+						'data-flow-component' => $flowComponent,
+						'data-flow-id'        => $apiResponse['workflow'],
+					),
+					$template( $apiResponse )
+				) );
 			}
 		}
 

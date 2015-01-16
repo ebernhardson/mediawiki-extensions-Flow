@@ -14,7 +14,7 @@ class FlowPage < WikiPage
   form(:edit_header_form, css: ".flow-board-header-edit-view form")
   textarea(:edit_header_textbox, css: ".flow-board-header-edit-view textarea")
 
-  a(:author_link, css: ".flow-author a", index:0)
+  a(:author_link, css: ".flow-author a", index: 0)
   a(:cancel_button, text: "Cancel")
 
   # XXX (mattflaschen, 2014-06-24): This is broken; there is no
@@ -23,11 +23,6 @@ class FlowPage < WikiPage
   textarea(:comment_field, css: 'form.flow-topic-reply-form > textarea[name="topic_content"]')
   button(:comment_reply_save, css: "form.flow-topic-reply-form .flow-reply-submit")
   div(:flow_topics, class: "flow-topics")
-
-  # Collapse button
-  a(:topics_and_posts_view, href: "#topics/full")
-  a(:small_topics_view, href: "#topics/compact")
-  a(:topics_only_view, href: "#topics/topics")
 
   # Dialogs
   div(:dialog, css: ".flow-ui-modal")
@@ -44,8 +39,12 @@ class FlowPage < WikiPage
   ## First topic
   div(:flow_first_topic, css: ".flow-topic", index: 0)
   h2(:flow_first_topic_heading, css: ".flow-topic h2", index: 0)
-  div(:flow_first_topic_body, css: ".flow-post-content", index: 0)
-  div(:flow_first_topic_moderation_msg, css: "div.flow-topic-titlebar div.flow-moderated-topic-title")
+  # todo this is poor naming, it's really the first_topic_first_post_content
+  div(:flow_first_topic_body, css: ".flow-topic .flow-post-content", index: 0)
+  div(:flow_first_topic_moderation_msg) do |page|
+    page.flow_first_topic_element.div_element(css: "div.flow-topic-titlebar div.flow-moderated-topic-title")
+  end
+
   div(:flow_first_topic_summary) do |page|
     page.flow_first_topic_element.div_element(css: ".flow-topic-summary")
   end
@@ -70,11 +69,6 @@ class FlowPage < WikiPage
   ### First Topic actions menu
 
   # For topic collapsing testing
-  # Watir WebDriver apparently doesn't support CSS :not (https://developer.mozilla.org/en-US/docs/Web/CSS/:not), so using XPath
-  h2(:first_non_moderated_topic_title, xpath: '(//*[contains(@class, "flow-topic ") and not(contains(@class, "flow-topic-moderated"))]//h2[contains(@class, "flow-topic-title")])[1]')
-  span(:first_non_moderated_topic_starter, xpath: '(//*[contains(@class, "flow-topic ") and not(contains(@class, "flow-topic-moderated"))]//*[contains(@class, "flow-topic-titlebar")]//*[contains(@class, "flow-author")])[1]')
-  div(:first_non_moderated_topic_post_content, xpath: '(//*[contains(@class, "flow-topic ") and not(contains(@class, "flow-topic-moderated"))]//*[contains(@class, "flow-post-content")])[1]')
-
   # Works around CSS descendant selector problem (https://github.com/cheezy/page-object/issues/222)
   div(:first_moderated_topic, css: '.flow-topic.flow-topic-moderated', index: 0)
 
@@ -88,10 +82,6 @@ class FlowPage < WikiPage
 
   h2(:first_moderated_topic_title) do |page|
     page.first_moderated_topic_titlebar_element.h2_element(class: 'flow-topic-title')
-  end
-
-  span(:first_moderated_topic_starter) do |page|
-    page.first_moderated_topic_titlebar_element.span_element(class: 'flow-author')
   end
 
   div(:first_moderated_topic_post_content) do |page|
@@ -135,7 +125,7 @@ class FlowPage < WikiPage
   button(:change_title_save, css: ".flow-topic-titlebar form .mw-ui-constructive")
 
   ### Post meta actions
-  span(:post_meta_actions, css:".flow-post .flow-post-meta-actions", index: 0)
+  span(:post_meta_actions, css: ".flow-post .flow-post-meta-actions", index: 0)
   a(:edit_post) do |page|
     page.post_meta_actions_element.link_element(title: "Edit")
   end
@@ -172,7 +162,7 @@ class FlowPage < WikiPage
   # @todo: Should be index: 2, but sadly no way to distinguish replies from original post
   div(:third_reply, css: '.flow-post', index: 3)
   div(:third_reply_moderation_msg) do |page|
-    page.third_reply_element.div_element(css: '.flow-moderated-post-content', index: 0)
+    page.third_reply_element.span_element(css: '.flow-moderated-post-content', index: 0)
   end
   div(:third_reply_content) do |page|
     page.third_reply_element.div_element(css: '.flow-post-content', index: 0)
@@ -201,7 +191,7 @@ class FlowPage < WikiPage
   # top-level replies to the topic, and replies to regular posts
   form(:new_reply_form, css: ".flow-reply-form")
   # Is an input when not focused, textarea when focused
-  text_field(:new_reply_input, css: ".flow-reply-form .mw-ui-input")
+  textarea(:new_reply_input, css: ".flow-reply-form .mw-ui-input")
   button(:new_reply_cancel, css: ".flow-reply-form .mw-ui-destructive")
   button(:new_reply_preview, css: ".flow-reply-form .mw-ui-progressive")
   button(:new_reply_save, css: ".flow-reply-form .mw-ui-constructive")
@@ -217,15 +207,26 @@ class FlowPage < WikiPage
 
   button(:edit_header_save, text: "Save header")
 
+  # No javascript elements
+  button(:no_javascript_add_topic, text: "Add topic")
+  div(:no_javascript_page_content_body, class: "flow-post-content")
+  div(:no_javascript_page_content_title, class: "flow-topic-titlebar")
+  div(:no_javascript_page_flow_topics, class: "flow-topics")
+  button(:no_javascript_reply, text: "Reply")
+  textarea(:no_javascript_reply_form, name: "topic_content")
+  a(:no_javascript_start_reply, href: /action=reply/)
+  a(:no_javascript_start_topic, href: /action=new-topic/)
+  textarea(:no_javascript_topic_body_text, name: "topiclist_content")
+  text_field(:no_javascript_topic_title_text, name: "topiclist_topic")
+
   # Sorting
   a(:newest_topics_link, text: "Newest topics")
   a(:recently_active_topics_choice, href: /topiclist_sortby=updated/)
   a(:recently_active_topics_link, text: "Recently active topics")
   a(:newest_topics_choice, href: /topiclist_sortby=newest/)
 
-
   ## Watch and unwatch links
-  div(:first_topic_watchlist_container, css: ".flow-topic-watchlist", index:0)
+  div(:first_topic_watchlist_container, css: ".flow-topic-watchlist", index: 0)
   a(:first_topic_watch_link) do |page|
     page.first_topic_watchlist_container_element.link_element(css: ".flow-watch-link-watch")
   end
@@ -235,5 +236,4 @@ class FlowPage < WikiPage
 
   a(:board_unwatch_link, href: /Flow_QA&action=unwatch/)
   a(:board_watch_link, href: /Flow_QA&action=watch/)
-
-  end
+end

@@ -11,7 +11,7 @@ QUnit.module( 'ext.flow: FlowBoardComponent', {
 
 		this.$el = $( '<div class="flow-component" data-flow-component="board">' );
 		this.component = mw.flow.initComponent( this.$el );
-		stub = this.sandbox.stub( this.component.API, 'apiCall' );
+		stub = this.sandbox.stub( this.component.Api, 'apiCall' );
 
 		stub.withArgs( {
 			action: 'flow',
@@ -19,7 +19,7 @@ QUnit.module( 'ext.flow: FlowBoardComponent', {
 			workflow: 's18cjkj1bs3rkt13',
 			page: 'Topic:S18cjkj1bs3rkt13'
 		} ).returns(
-			new $.Deferred().resolve( {
+			$.Deferred().resolve( {
 				flow: {
 					'view-topic': {
 						result: {
@@ -50,7 +50,7 @@ QUnit.module( 'ext.flow: FlowBoardComponent', {
 			workflow: 't18cjkj1bs3rkt13',
 			page: 'Topic:T18cjkj1bs3rkt13'
 		} ).returns(
-			new $.Deferred().resolve( {
+			$.Deferred().resolve( {
 				flow: {
 					'view-topic': {
 						result: {

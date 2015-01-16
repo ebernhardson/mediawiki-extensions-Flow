@@ -33,8 +33,9 @@ $wgExtensionCredits['other'][] = array(
 
 require_once __DIR__ . '/defines.php';
 
+define( 'CONTENT_MODEL_FLOW_BOARD', 'flow-board' );
 $wgNamespacesWithSubpages[NS_TOPIC] = false;
-$wgNamespaceContentModels[NS_TOPIC] = 'flow-board';
+$wgNamespaceContentModels[NS_TOPIC] = CONTENT_MODEL_FLOW_BOARD;
 
 $dir = __DIR__ . '/';
 require $dir . 'Resources.php';
@@ -96,6 +97,10 @@ $wgHooks['WatchlistEditorBeforeFormRender'][] = 'FlowHooks::onWatchlistEditorBef
 $wgHooks['UserMergeAccountFields'][] = 'FlowHooks::onUserMergeAccountFields';
 $wgHooks['MergeAccountFromTo'][] = 'FlowHooks::onMergeAccountFromTo';
 
+// Special case: Flow is the successor to LiquidThreads and any Flow boards should automatically
+// not be LiquidThreads talk pages.
+$wgHooks['LiquidThreadsIsLqtPage'][] = 'FlowHooks::onIsLiquidThreadsPage';
+
 // Extension initialization
 $wgExtensionFunctions[] = 'FlowHooks::initFlowExtension';
 
@@ -115,6 +120,7 @@ $wgFlowGroupPermissions['sysop']['flow-lock'] = true;
 $wgFlowGroupPermissions['sysop']['flow-delete'] = true;
 $wgFlowGroupPermissions['sysop']['flow-edit-post'] = true;
 $wgFlowGroupPermissions['oversight']['flow-suppress'] = true;
+$wgFlowGroupPermissions['flow-bot']['flow-create-board'] = true;
 $wgGroupPermissions = array_merge_recursive( $wgGroupPermissions, $wgFlowGroupPermissions );
 
 // Register Flow import paths
@@ -179,6 +185,10 @@ $wgFlowMaxLimit = 100;
 // Echo notification subscription preference
 $wgDefaultUserOptions['echo-subscriptions-web-flow-discussion'] = true;
 $wgDefaultUserOptions['echo-subscriptions-email-flow-discussion'] = false;
+
+// Default sort order of a topiclist view. See TopicListBlock::getFindOptions()
+// for more information.
+$wgDefaultUserOptions['flow-topiclist-sortby'] = 'newest';
 
 // Maximum number of users that can be mentioned in one comment
 $wgFlowMaxMentionCount = 100;
@@ -270,3 +280,18 @@ $wgFlowCoreActionWhitelist = array( 'info', 'protect', 'unprotect', 'unwatch', '
 // to disk. Production should always have this set to false.
 $wgFlowServerCompileTemplates = false;
 
+// Forward users' Cookie: headers to Parsoid. Required for private wikis (login required to read).
+// If the wiki is not private (i.e. $wgGroupPermissions['*']['read'] is true) this configuration
+// variable will be ignored.
+//
+// This feature requires a non-locking session store. The default session store will not work and
+// will cause deadlocks when trying to use this feature. If you experience deadlock issues, enable
+// $wgSessionsInObjectCache.
+//
+// WARNING: ONLY enable this on private wikis and ONLY IF you understand the SECURITY IMPLICATIONS
+// of sending Cookie headers to Parsoid over HTTP. For security reasons, it is strongly recommended
+// that $wgVisualEditorParsoidURL be pointed to localhost if this setting is enabled.
+$wgFlowParsoidForwardCookies = false;
+
+// Enable/disable event logging
+$wgFlowEventLogging = true;

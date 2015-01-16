@@ -15,13 +15,15 @@
 	 * @mixins FlowBoardComponentInteractiveEventsMixin
 	 * @mixins FlowBoardComponentLoadEventsMixin
 	 * @mixins FlowBoardComponentMiscMixin
+	 * @mixins FlowBoardComponentLoadMoreFeatureMixin
 	 * @constructor
 	 */
 	function FlowBoardComponent( $container ) {
-		var uri = new mw.Uri( window.location.href );
+		var uri = new mw.Uri( location.href ),
+			uid = String( location.hash.match( /[0-9a-z]{16,19}$/i ) || '' );
 
 		// Default API submodule for FlowBoard URLs is to fetch a topiclist
-		this.API.setDefaultSubmodule( 'view-topiclist' );
+		this.Api.setDefaultSubmodule( 'view-topiclist' );
 
 		// Set up the board
 		if ( this.reinitializeContainer( $container ) === false ) {
@@ -30,11 +32,11 @@
 		}
 
 		// Handle URL parameters
-		if ( window.location.hash ) {
+		if ( uid ) {
 			if ( uri.query.fromnotif ) {
-				_flowHighlightPost( $container, window.location.hash, 'newer' );
+				_flowHighlightPost( $container, uid, 'newer' );
 			} else {
-				_flowHighlightPost( $container, window.location.hash );
+				_flowHighlightPost( $container, uid );
 			}
 		}
 
@@ -66,7 +68,6 @@
 		// Find any new (or previous) elements
 			$header = $container.find( '.flow-board-header' ).addBack().filter( '.flow-board-header:first' ),
 			$boardNavigation = $container.find( '.flow-board-navigation' ).addBack().filter( '.flow-board-navigation:first' ),
-			$topicNavigation = $container.find( '.flow-topic-navigation' ).addBack().filter( '.flow-topic-navigation:first' ),
 			$board = $container.find( '.flow-board' ).addBack().filter( '.flow-board:first' );
 
 		if ( $retObj === false ) {
@@ -98,14 +99,6 @@
 
 			this.$board = $board;
 		}
-		if ( $topicNavigation.length ) {
-			if ( this.$topicNavigation ) {
-				$retObj = $retObj.add( this.$topicNavigation.replaceWith( $topicNavigation ) );
-				this.$topicNavigation.remove();
-			}
-		}
-
-		this.$topicNavigation = $topicNavigation;
 
 		// Second, verify that this board in fact exists
 		if ( !this.$board || !this.$board.length ) {
@@ -115,6 +108,23 @@
 		}
 
 		this.emitWithReturn( 'makeContentInteractive', this );
+
+		// Initialize editors, turning them from textareas into editor objects
+		if ( typeof this.editorTimer === 'undefined' ) {
+			/*
+			 * When this method is first run, all page elements are initialized.
+			 * We probably don't need editor immediately, so defer loading it
+			 * to speed up the rest of the work that needs to be done.
+			 */
+			this.editorTimer = setTimeout( $.proxy( function ( $container ) { this.emitWithReturn( 'initializeEditors', $container ); }, this, $container ), 20000 );
+		} else {
+			/*
+			 * Subsequent calls here (e.g. when rendering the edit header form)
+			 * should immediately initialize the editors!
+			 */
+			clearTimeout( this.editorTimer );
+			this.emitWithReturn( 'initializeEditors', $container );
+		}
 
 		return $retObj;
 	}
@@ -126,14 +136,13 @@
 
 	/**
 	 * Helper receives
-	 * @param {jQuery}
-	 * @param {string}
-	 * @param {string}
+	 * @param {jQuery} $container
+	 * @param {string} uid
+	 * @param {string} option
 	 * @return {jQuery}
 	 */
-	function _flowHighlightPost( $container, targetSelector, option ) {
-		var $target = $container.find( targetSelector ),
-			uid = $target.data( 'flow-id' );
+	function _flowHighlightPost( $container, uid, option ) {
+		var $target = $container.find( '#flow-post-' + uid );
 
 		// reset existing highlights
 		$container.find( '.flow-post-highlighted' ).removeClass( 'flow-post-highlighted' );

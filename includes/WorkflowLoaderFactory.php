@@ -8,6 +8,8 @@ use Flow\Data\ManagerGroup;
 use Flow\Exception\CrossWikiException;
 use Flow\Exception\InvalidInputException;
 use Flow\Exception\InvalidDataException;
+use Flow\Exception\InvalidTopicUuidException;
+use Flow\Exception\UnknownWorkflowIdException;
 use Title;
 
 class WorkflowLoaderFactory {
@@ -87,7 +89,6 @@ class WorkflowLoaderFactory {
 	 * @throws InvalidDataException
 	 */
 	protected function loadWorkflow( \Title $title ) {
-		global $wgUser;
 		$storage = $this->storage->getStorage( 'Workflow' );
 
 		$found = $storage->find( array(
@@ -99,7 +100,7 @@ class WorkflowLoaderFactory {
 		if ( $found ) {
 			$workflow = reset( $found );
 		} else {
-			$workflow = Workflow::create( $this->defaultWorkflowName, $wgUser, $title );
+			$workflow = Workflow::create( $this->defaultWorkflowName, $title );
 		}
 
 		return $workflow;
@@ -115,7 +116,7 @@ class WorkflowLoaderFactory {
 		/** @var Workflow $workflow */
 		$workflow = $this->storage->getStorage( 'Workflow' )->get( $workflowId );
 		if ( !$workflow ) {
-			throw new InvalidInputException( 'Invalid workflow requested by id', 'invalid-input' );
+			throw new UnknownWorkflowIdException( 'Invalid workflow requested by id', 'invalid-input' );
 		}
 		if ( $title !== false && !$workflow->matchesTitle( $title ) ) {
 			throw new InvalidInputException( 'Flow workflow is for different page', 'invalid-input' );
@@ -148,6 +149,10 @@ class WorkflowLoaderFactory {
 			throw new InvalidInputException( "Title is not from NS_TOPIC: $ns", 'invalid-input' );
 		}
 
-		return UUID::create( strtolower( $dbKey ) );
+		try {
+			return UUID::create( strtolower( $dbKey ) );
+		} catch ( InvalidInputException $e ) {
+			throw new InvalidTopicUuidException( "$dbKey is not a valid UUID", 0, $e );
+		}
 	}
 }

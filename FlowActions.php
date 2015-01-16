@@ -6,7 +6,7 @@ use Flow\Model\PostSummary;
 use Flow\Model\Header;
 use Flow\RevisionActionPermissions;
 use Flow\Log\Logger;
-use Flow\Data\RecentChanges\RecentChanges;
+use Flow\Data\Listener\RecentChangesListener;
 
 /**
  * Flow actions: key => value map with key being the action name.
@@ -190,7 +190,7 @@ $wgFlowActions = array(
 		'root-permissions' => array(
 			PostRevision::MODERATED_NONE => '',
 		),
-		'links' => array( 'post-history', 'topic', 'post', 'diff-post', 'post-revision' ),
+		'links' => array( 'post-history', 'topic-history', 'topic', 'post', 'diff-post', 'post-revision' ),
 		'actions' => array( 'reply', 'thank', 'edit-post', 'restore-post', 'hide-post', 'delete-post', 'suppress-post' ),
 		'history' => array(
 			'i18n-message' => 'flow-rev-message-edit-post',
@@ -404,7 +404,7 @@ $wgFlowActions = array(
 
 			return '';
 		},
-		'rc_insert' => function( PostRevision $revision, RecentChanges $recentChanges ) {
+		'rc_insert' => function( PostRevision $revision, RecentChangesListener $recentChanges ) {
 			$post = $revision->getCollection();
 			$previousRevision = $post->getPrevRevision( $revision );
 			if ( $previousRevision ) {
@@ -457,7 +457,7 @@ $wgFlowActions = array(
 
 			return '';
 		},
-		'rc_insert' => function( PostRevision $revision, RecentChanges $recentChanges ) {
+		'rc_insert' => function( PostRevision $revision, RecentChangesListener $recentChanges ) {
 				$post = $revision->getCollection();
 				$previousRevision = $post->getPrevRevision( $revision );
 				if ( $previousRevision ) {
@@ -502,7 +502,8 @@ $wgFlowActions = array(
 		'rc_insert' => false, // won't even be called, actually; only for writes
 		'permissions' => array(
 			PostRevision::MODERATED_NONE => '',
-			PostRevision::MODERATED_HIDDEN => '', // visible for everyone (but will initially be collapsed)
+			// Everyone has permission to see this, but hidden comments are only visible (collapsed) on permalinks directly to them.
+			PostRevision::MODERATED_HIDDEN => '',
 			PostRevision::MODERATED_LOCKED => '',
 			PostRevision::MODERATED_DELETED => array( 'flow-delete', 'flow-suppress' ),
 			PostRevision::MODERATED_SUPPRESSED => 'flow-suppress',

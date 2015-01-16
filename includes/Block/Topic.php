@@ -394,7 +394,7 @@ class TopicBlock extends AbstractBlock {
 	}
 
 	public function commit() {
-		$this->workflow->updateLastModified();
+		$this->workflow->updateLastModified( $this->newRevision->getRevisionId() );
 
 		switch( $this->action ) {
 		case 'reply':
@@ -434,16 +434,21 @@ class TopicBlock extends AbstractBlock {
 				$newRevision->setChildren( array() );
 			}
 
-			return array(
-				'new-revision-id' => $this->newRevision->getRevisionId(),
+			$returnMetadata = array(
+				'post-revision-id' => $this->newRevision->getRevisionId(),
 			);
+			if ( $this->newRevision->isFirstRevision() ) {
+				$returnMetadata['post-id'] = $this->newRevision->getPostId();
+			}
+
+			return $returnMetadata;
 
 		default:
 			throw new InvalidActionException( "Unknown commit action: {$this->action}", 'invalid-action' );
 		}
 	}
 
-	public function renderAPI( array $options ) {
+	public function renderApi( array $options ) {
 		$output = array( 'type' => $this->getName() );
 
 		$topic = $this->loadTopicTitle( $this->action === 'history' ? 'history' : 'view' );
@@ -458,10 +463,10 @@ class TopicBlock extends AbstractBlock {
 			// single post history or full topic?
 			if ( isset( $options['postId'] ) ) {
 				// singular post history
-				$output += $this->renderPostHistoryAPI( $options, UUID::create( $options['postId'] ) );
+				$output += $this->renderPostHistoryApi( $options, UUID::create( $options['postId'] ) );
 			} else {
 				// post history for full topic
-				$output += $this->renderTopicHistoryAPI( $options );
+				$output += $this->renderTopicHistoryApi( $options );
 			}
 		} elseif ( $this->action === 'single-view' ) {
 			if ( isset( $options['revId'] ) ) {
@@ -469,22 +474,22 @@ class TopicBlock extends AbstractBlock {
 			} else {
 				throw new InvalidInputException( 'A revision must be provided', 'invalid-input' );
 			}
-			$output += $this->renderSingleViewAPI( $revId );
+			$output += $this->renderSingleViewApi( $revId );
 		} elseif ( $this->action === 'lock-topic' ) {
 			// Treat topic as a post, only the post + summary are needed
-			$result = $this->renderPostAPI( $options, $this->workflow->getId() );
+			$result = $this->renderPostApi( $options, $this->workflow->getId() );
 			$topicId = $result['roots'][0];
 			$revisionId = $result['posts'][$topicId][0];
 			$output += $result['revisions'][$revisionId];
 		} elseif ( $this->action === 'compare-post-revisions' ) {
-			$output += $this->renderDiffViewAPI( $options );
-		} elseif ( $this->shouldRenderTopicAPI( $options ) ) {
+			$output += $this->renderDiffViewApi( $options );
+		} elseif ( $this->shouldRenderTopicApi( $options ) ) {
 			// view full topic
-			$output += $this->renderTopicAPI( $options );
+			$output += $this->renderTopicApi( $options );
 		} else {
 			// view single post, possibly specific revision
 			// @todo this isn't valid for the topic title
-			$output += $this->renderPostAPI( $options );
+			$output += $this->renderPostApi( $options );
 		}
 
 		return $output + $this->finalizeApiOutput($options);
@@ -504,12 +509,12 @@ class TopicBlock extends AbstractBlock {
 		} else {
 			return array(
 				'submitted' => $options,
-				'errors' => array(),
+				'errors' => $this->errors,
 			);
 		}
 	}
 
-	protected function shouldRenderTopicAPI( array $options ) {
+	protected function shouldRenderTopicApi( array $options ) {
 		switch( $this->action ) {
 		// Any actions require rerendering the whole topic
 		case 'edit-post':
@@ -532,7 +537,7 @@ class TopicBlock extends AbstractBlock {
 	}
 
 	// @Todo - duplicated logic in other diff view block
-	protected function renderDiffViewAPI( array $options ) {
+	protected function renderDiffViewApi( array $options ) {
 		if ( !isset( $options['newRevision'] ) ) {
 			throw new InvalidInputException( 'A revision must be provided for comparison', 'revision-comparison' );
 		}
@@ -548,7 +553,7 @@ class TopicBlock extends AbstractBlock {
 	}
 
 	// @Todo - duplicated logic in other single view block
-	protected function renderSingleViewAPI( $revId ) {
+	protected function renderSingleViewApi( $revId ) {
 		$row = Container::get( 'query.post.view' )->getSingleViewResult( $revId );
 
 		return array(
@@ -556,7 +561,7 @@ class TopicBlock extends AbstractBlock {
 		);
 	}
 
-	protected function renderTopicAPI( array $options, $workflowId = '' ) {
+	protected function renderTopicApi( array $options, $workflowId = '' ) {
 		$serializer = Container::get( 'formatter.topic' );
 		if ( !$workflowId ) {
 			if ( $this->workflow->isNew() ) {
@@ -591,7 +596,7 @@ class TopicBlock extends AbstractBlock {
 	 * To generate forms with validation errors in the non-javascript renders we
 	 * need to add something to this output, but not sure what yet
 	 */
-	protected function renderPostAPI( array $options, $postId = '' ) {
+	protected function renderPostApi( array $options, $postId = '' ) {
 		if ( $this->workflow->isNew() ) {
 			throw new FlowException( 'No posts can exist for non-existent topic' );
 		}
@@ -637,7 +642,7 @@ class TopicBlock extends AbstractBlock {
 		return $serializer;
 	}
 
-	protected function renderTopicHistoryAPI( array $options ) {
+	protected function renderTopicHistoryApi( array $options ) {
 		if ( $this->workflow->isNew() ) {
 			throw new FlowException( 'No topic history can exist for non-existent topic' );
 		}
@@ -645,7 +650,7 @@ class TopicBlock extends AbstractBlock {
 		return $this->processHistoryResult( $found, $options );
 	}
 
-	protected function renderPostHistoryAPI( array $options, UUID $postId ) {
+	protected function renderPostHistoryApi( array $options, UUID $postId ) {
 		if ( $this->workflow->isNew() ) {
 			throw new FlowException( 'No post history can exist for non-existent topic' );
 		}
@@ -730,11 +735,73 @@ class TopicBlock extends AbstractBlock {
 		}
 
 		if ( !$this->permissions->isAllowed( $this->topicTitle, $action ) ) {
-			$this->addError( 'permissions', $this->context->msg( 'flow-error-not-allowed' ) );
+			if ( in_array( $this->action, array( 'moderate-topic', 'moderate-post' ) ) ) {
+				/*
+				 * When failing to moderate an already moderated action (like
+				 * undo), show the more general "you have insufficient
+				 * permissions for this action" message, rather than the
+				 * specialized "this topic is <hidden|deleted|suppressed>" msg.
+				 */
+				$this->addError( 'permissions', $this->context->msg( 'flow-error-not-allowed' ) );
+			} else {
+				$this->addError( 'permissions', $this->getDisallowedErrorMessage( $this->topicTitle ) );
+			}
+
 			return null;
 		}
 
 		return $this->topicTitle;
+	}
+
+	/**
+	 * @param AbstractRevision $revision
+	 * @return Message
+	 */
+	protected function getDisallowedErrorMessage( AbstractRevision $revision ) {
+		$state = $revision->getModerationState();
+
+		// state doesn't exist in log, display simple
+		if ( !\LogPage::isLogType( $state ) ) {
+			return $this->context->msg( 'flow-error-not-allowed-' . $state );
+		}
+
+		// check if user has sufficient permissions to see log
+		$logPage = new \LogPage( $state );
+		if ( !$this->context->getUser()->isAllowed( $logPage->getRestriction() ) ) {
+			return $this->context->msg( 'flow-error-not-allowed-' . $state );
+		}
+
+		// LogEventsList::showLogExtract will write to OutputPage, but we
+		// actually just want that text, to write it ourselves wherever we want,
+		// so let's create an OutputPage object to then get the content from.
+		$rc = new \RequestContext();
+		$output = $rc->getOutput();
+
+		// get log extract
+		$entries = \LogEventsList::showLogExtract(
+			$output,
+			array( $state ),
+			$this->workflow->getArticleTitle()->getPrefixedText(),
+			'',
+			array(
+				'lim' => 10,
+				'showIfEmpty' => false,
+				// i18n messages: flow-error-not-allowed-hide-extract,
+				// flow-error-not-allowed-delete-extract, flow-error-not-allowed-suppress-extract
+				'msgKey' => array( 'flow-error-not-allowed-' . $state . '-extract' )
+			)
+		);
+
+		// check if there were any log extracts
+		if ( $entries ) {
+			$message = new \RawMessage( '$1' );
+			return $message->rawParams( $output->getHTML() );
+		}
+
+		// display simple message
+		// i18n messages: flow-error-not-allowed-hide,
+		// flow-error-not-allowed-delete, flow-error-not-allowed-suppress
+		return $this->context->msg( 'flow-error-not-allowed-' . $state );
 	}
 
 	/**
